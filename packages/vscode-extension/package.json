@@ -1,0 +1,69 @@
+{
+  "name": "driftcode-vscode",
+  "displayName": "DriftCode Harness",
+  "description": "Voice-first coding harness adapter for VS Code",
+  "version": "0.1.0",
+  "publisher": "driftcode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "driftcode.reconnect",
+        "title": "DriftCode: Reconnect to Orchestrator"
+      },
+      {
+        "command": "driftcode.pushState",
+        "title": "DriftCode: Push Editor State"
+      }
+    ],
+    "configuration": {
+      "title": "DriftCode",
+      "properties": {
+        "driftcode.orchestratorUrl": {
+          "type": "string",
+          "default": "ws://127.0.0.1:17345/ws/vscode",
+          "description": "WebSocket URL for the DriftCode orchestrator"
+        },
+        "driftcode.reconnectDelayMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "description": "Delay before reconnecting after a disconnect"
+        },
+        "driftcode.stateDebounceMs": {
+          "type": "number",
+          "default": 200,
+          "minimum": 50,
+          "description": "Debounce interval for editor state pushes"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

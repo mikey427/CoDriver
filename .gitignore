@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+*.vsix
+.vscode-test/
+packages/admin/dist/
+packages/*/dist/
+packages/vscode-extension/out/
+.driftcode/
+~/.driftcode/

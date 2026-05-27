@@ -1,0 +1,20 @@
+{
+  "name": "driftcode-harness",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @driftcode/shared && npm run build -w @driftcode/orchestrator && npm run build -w @driftcode/admin && npm run compile -w driftcode-vscode",
+    "build:shared": "npm run build -w @driftcode/shared",
+    "build:orchestrator": "npm run build -w @driftcode/orchestrator",
+    "build:admin": "npm run build -w @driftcode/admin",
+    "build:extension": "npm run compile -w driftcode-vscode",
+    "start": "npm run start -w @driftcode/orchestrator",
+    "dev:admin": "npm run dev -w @driftcode/admin",
+    "setup": "node scripts/setup.mjs",
+    "test:utterance": "node scripts/test-utterance.mjs",
+    "test:mvp": "node scripts/test-mvp.mjs",
+    "test:benchmark": "node scripts/test-benchmark.mjs"
+  }
+}

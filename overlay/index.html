@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DriftCode Overlay</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: transparent;
+      color: #e8eaed;
+      overflow: hidden;
+    }
+    .overlay {
+      width: 420px;
+      padding: 12px 16px;
+      background: rgba(12, 14, 20, 0.88);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      backdrop-filter: blur(8px);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .mode-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 4px 10px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .privacy { font-size: 11px; opacity: 0.7; margin-left: auto; }
+    .emergency {
+      background: #dc2626;
+      color: #fff;
+      text-align: center;
+      padding: 6px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 12px;
+      margin-bottom: 8px;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse { 50% { opacity: 0.7; } }
+    .row { font-size: 13px; margin: 4px 0; line-height: 1.4; }
+    .label { color: #9aa0a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .value { word-break: break-word; }
+    .intent { color: #a78bfa; }
+    .file { color: #34d399; font-family: monospace; font-size: 12px; }
+    .confidence { font-size: 11px; opacity: 0.8; }
+    .disconnected { opacity: 0.5; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="overlay" id="overlay">
+    <div id="emergency" class="emergency" style="display:none">EMERGENCY STOP</div>
+    <div class="header">
+      <span class="mode-badge" id="modeBadge">CONNECTING</span>
+      <span class="privacy" id="privacy"></span>
+    </div>
+    <div class="row"><span class="label">Last heard</span><div class="value" id="lastHeard">—</div></div>
+    <div class="row"><span class="label">Intent</span><div class="value intent" id="intent">—</div></div>
+    <div class="row confidence" id="confidence"></div>
+    <div class="row"><span class="label">File</span><div class="value file" id="file">—</div></div>
+    <div class="row"><span class="label">AI</span><div class="value" id="aiStatus">idle</div></div>
+  </div>
+  <script>
+    const MODE_COLORS = {
+      'manual-dictation': '#22c55e',
+      'command': '#3b82f6',
+      'ai-assist': '#a855f7',
+      'vibe-coding': '#f97316',
+      'research': '#06b6d4',
+      'browser': '#14b8a6',
+      'app-testing': '#eab308',
+      'review': '#6366f1',
+      'terminal': '#64748b',
+      'stream-control': '#ec4899',
+      'emergency-safe': '#dc2626',
+    };
+
+    function applyState(state) {
+      const mode = state.activeModeId || 'unknown';
+      const badge = document.getElementById('modeBadge');
+      badge.textContent = state.activeModeDisplayName || mode;
+      badge.style.background = MODE_COLORS[mode] || '#374151';
+      badge.style.color = '#fff';
+
+      document.getElementById('emergency').style.display = state.emergencyStopActive ? 'block' : 'none';
+      document.getElementById('privacy').textContent = state.streamPrivacyActive ? '🛡 privacy' : '';
+
+      const utterance = state.lastNormalizedUtterance;
+      document.getElementById('lastHeard').textContent = utterance?.normalizedText || '—';
+
+      const intent = state.lastParsedIntent;
+      document.getElementById('intent').textContent = intent
+        ? `${intent.intentType}${intent.summary ? ': ' + intent.summary : ''}`
+        : '—';
+      document.getElementById('confidence').textContent = intent?.confidence != null
+        ? `confidence ${Math.round(intent.confidence * 100)}% · ${intent.path || 'deterministic'}`
+        : '';
+
+      const editor = state.editorState;
+      document.getElementById('file').textContent = editor?.activeFileBasename || editor?.activeFilePath || '—';
+
+      const aiCalls = state.aiCallsThisSession ?? 0;
+      document.getElementById('aiStatus').textContent = aiCalls > 0
+        ? `${aiCalls} calls · $${(state.sessionCostUsd ?? 0).toFixed(3)}`
+        : 'idle';
+    }
+
+    function connect() {
+      const es = new EventSource('/api/events/stream');
+      es.addEventListener('dashboard.state', (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.payload) applyState(msg.payload);
+        } catch (_) {}
+      });
+      es.onerror = () => {
+        document.getElementById('modeBadge').textContent = 'OFFLINE';
+        document.getElementById('modeBadge').classList.add('disconnected');
+        es.close();
+        setTimeout(connect, 3000);
+      };
+      fetch('/api/dashboard').then(r => r.json()).then(applyState).catch(() => {});
+    }
+    connect();
+  </script>
+</body>
+</html>
