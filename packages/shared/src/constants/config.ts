@@ -30,6 +30,13 @@ export function createDefaultHarnessConfig(): HarnessConfig {
     obsEnabled: false,
     obsWebSocketUrl: 'ws://127.0.0.1:4455',
     protectedFileGlobs: ['**/.env*', '**/secrets/**'],
+    sttProviderId: 'http-inbox',
+    sttModel: 'whisper-1',
+    sttLanguage: 'en',
+    speechInboxPath: '.driftcode/inbox',
+    speechInboxEnabled: true,
+    onboardingCompleted: false,
+    aiProviderId: 'openai',
     appTestFlows: [
       {
         id: 'login',

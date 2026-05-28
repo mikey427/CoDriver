@@ -1,5 +1,5 @@
 import http from 'node:http';
-import path from 'node:path';
+import path, { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import pino from 'pino';
@@ -24,6 +24,10 @@ import { ObsAdapter } from './adapters/obs-adapter.js';
 import { PatchStore } from './services/patch-store.js';
 import { DevServerManager } from './services/dev-server-manager.js';
 import { AudioFeedback } from './services/audio-feedback.js';
+import { SpeechInputService } from './services/speech-input-service.js';
+import { SttManager } from './stt/stt-manager.js';
+import { OnboardingStore } from './onboarding/onboarding-store.js';
+import { PracticeEvaluator } from './onboarding/practice-evaluator.js';
 import { buildDashboardState } from './api/dashboard-state.js';
 import { registerRoutes } from './api/routes.js';
 
@@ -78,6 +82,17 @@ export async function createServer(): Promise<OrchestratorServer> {
     config,
   );
 
+  const sttManager = new SttManager(config, log);
+  await sttManager.ensureClient();
+
+  const onboarding = new OnboardingStore(dirname(configStore.getPath()));
+  const practice = new PracticeEvaluator(normalizer, parser);
+
+  const speech = new SpeechInputService(config, session, router, eventBus, log, configStore.getPath(), sttManager);
+  if (config.speechInboxEnabled !== false) {
+    speech.start();
+  }
+
   eventBus.emit(
     'session.started',
     { profileId: session.activeProfileId, modeId: session.activeModeId },
@@ -88,7 +103,7 @@ export async function createServer(): Promise<OrchestratorServer> {
   auditLog.append('session', 'started', { sessionId: session.sessionId, configPath: configStore.getPath() });
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '12mb' }));
 
   app.use((_req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -112,6 +127,10 @@ export async function createServer(): Promise<OrchestratorServer> {
     vscode,
     aiLayer,
     obs,
+    speech,
+    onboarding,
+    practice,
+    patchStore,
   };
 
   registerRoutes(app, apiCtx);
@@ -152,11 +171,14 @@ export async function createServer(): Promise<OrchestratorServer> {
     if (
       event.eventType.startsWith('mode.') ||
       event.eventType.startsWith('emergency.') ||
-      event.eventType.startsWith('tool.')
+      event.eventType.startsWith('tool.') ||
+      event.eventType.startsWith('utterance.') ||
+      event.eventType.startsWith('confirmation.') ||
+      event.eventType.startsWith('intent.')
     ) {
       broadcastAdmin({
         type: 'dashboard.state',
-        payload: buildDashboardState(session, eventBus, confirmations, vscode, aiLayer, obs),
+        payload: buildDashboardState(session, eventBus, confirmations, vscode, aiLayer, obs, speech),
       });
     }
   });
@@ -177,7 +199,7 @@ export async function createServer(): Promise<OrchestratorServer> {
         ws.send(
           JSON.stringify({
             type: 'dashboard.state',
-            payload: buildDashboardState(session, eventBus, confirmations, vscode, aiLayer, obs),
+            payload: buildDashboardState(session, eventBus, confirmations, vscode, aiLayer, obs, speech),
           }),
         );
         ws.on('close', () => adminClients.delete(ws));
@@ -200,6 +222,7 @@ export async function createServer(): Promise<OrchestratorServer> {
     port,
     close: () =>
       new Promise((resolve, reject) => {
+        speech.stop();
         for (const client of adminClients) {
           client.close();
         }

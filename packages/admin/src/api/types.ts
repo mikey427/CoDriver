@@ -4,10 +4,24 @@ export type {
   DashboardUtterance,
   HarnessConfig,
   ModeId,
+  OnboardingProgress,
+  OnboardingStepId,
+  PracticeResult,
   RuntimeEvent,
+  SttProviderInfo,
+  TutorialLesson,
 } from '@driftcode/shared';
 
-import type { HarnessConfig, RuntimeEvent, ModeId } from '@driftcode/shared';
+import type {
+  HarnessConfig,
+  OnboardingProgress,
+  RuntimeEvent,
+  ModeId,
+  SttProviderInfo,
+  TutorialLesson,
+} from '@driftcode/shared';
+
+export type { HarnessAppTestFlow, HarnessAppTestStep } from '@driftcode/shared';
 
 export interface CommandAliasRow {
   id: string;
@@ -49,10 +63,31 @@ export interface SafetyView {
 
 export interface SttSettingsView {
   providerId: string;
+  sttModel: string;
+  sttLanguage: string;
   micDeviceId?: string;
   wakePhraseEnabled: boolean;
   customVocabulary: string[];
   speechCorrections: HarnessConfig['speechCorrections'];
+  whisperAvailable: boolean;
+}
+
+export interface OnboardingResponse {
+  progress: OnboardingProgress;
+  isComplete: boolean;
+  prerequisites: Record<string, boolean>;
+  tutorialLessons: TutorialLesson[];
+}
+
+export interface SttProvidersResponse {
+  providers: SttProviderInfo[];
+  activeId: string;
+}
+
+export interface TranscribeResponse {
+  ok: boolean;
+  transcript: string;
+  processed?: boolean;
 }
 
 export interface OpenAiSettingsView {

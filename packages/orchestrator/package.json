@@ -12,7 +12,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "start:dev": "node --watch dist/index.js"
+    "start:dev": "node --watch dist/index.js",
+    "test:grammar": "node --test dist/pipeline/code-grammar/code-emitter.test.js"
   },
   "dependencies": {
     "@driftcode/shared": "*",

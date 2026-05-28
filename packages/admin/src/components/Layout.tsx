@@ -1,9 +1,15 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '@/api/client';
 import { useDashboard } from '@/hooks/useDashboard';
 import { ModeBadge } from '@/components/ModeBadge';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '◉' },
+  { to: '/onboarding', label: 'Setup', icon: '✦' },
+  { to: '/tutorial', label: 'Tutorial', icon: '▷' },
+  { to: '/app-tests', label: 'App Tests', icon: '◎' },
   { to: '/commands', label: 'Commands', icon: '▸' },
   { to: '/logs', label: 'Logs', icon: '≡' },
   { to: '/modes', label: 'Modes', icon: '◫' },
@@ -26,6 +32,13 @@ function formatDuration(startedAt?: string): string {
 
 export function Layout() {
   const { state, connection, error } = useDashboard();
+  const [onboardingIncomplete, setOnboardingIncomplete] = useState(false);
+
+  useEffect(() => {
+    void api.getOnboarding()
+      .then((data) => setOnboardingIncomplete(!data.isComplete && !data.progress.dismissed))
+      .catch(() => setOnboardingIncomplete(false));
+  }, []);
 
   return (
     <div className="app-shell">
@@ -90,6 +103,13 @@ export function Layout() {
             {error && <span style={{ color: 'var(--status-error)' }}>Offline</span>}
           </div>
         </header>
+
+        {onboardingIncomplete && (
+          <div className="onboarding-banner">
+            <span>Complete setup to enable microphone transcription and voice commands.</span>
+            <Link to="/onboarding" className="btn btn-primary btn-sm">Open wizard</Link>
+          </div>
+        )}
 
         <main className="page-content">
           <Outlet context={{ dashboard: state, connection, error }} />

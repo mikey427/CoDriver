@@ -12,12 +12,15 @@ import type {
   ToolResult,
 } from '@driftcode/shared';
 import type { EditorState } from '@driftcode/shared';
+import type { DictationPhraseRecord } from './pipeline/code-grammar/grammar-types.js';
 import {
   defaultDevServerStatus,
   defaultFocusTarget,
   emptyEditorState,
   modeDisplayName,
 } from './helpers/factories.js';
+
+export type { DictationPhraseRecord };
 
 export class Session {
   readonly sessionId: string;
@@ -41,7 +44,10 @@ export class Session {
   devServerStatus: DevServerStatus | string = defaultDevServerStatus();
   commandHistory: DashboardCommandHistoryEntry[] = [];
   lastToolResults: ToolResult[] = [];
+  /** Legacy text-only history — kept for compatibility */
   dictationHistory: string[] = [];
+  dictationPhrases: DictationPhraseRecord[] = [];
+  lastUtteranceForRepeat?: string;
   activeAiTask?: { summary: string; taskType: string; status: string };
   pendingPatchSummary?: string;
 
@@ -64,6 +70,23 @@ export class Session {
   pushCommandHistory(entry: DashboardCommandHistoryEntry): void {
     this.commandHistory.unshift(entry);
     if (this.commandHistory.length > 50) this.commandHistory.pop();
+  }
+
+  pushDictationPhrase(record: DictationPhraseRecord): void {
+    this.dictationPhrases.push(record);
+    this.dictationHistory.push(record.text);
+    if (this.dictationPhrases.length > 50) this.dictationPhrases.shift();
+    if (this.dictationHistory.length > 50) this.dictationHistory.shift();
+  }
+
+  getLastDictationPhrase(): DictationPhraseRecord | undefined {
+    return this.dictationPhrases[this.dictationPhrases.length - 1];
+  }
+
+  popLastDictationPhrase(): DictationPhraseRecord | undefined {
+    const last = this.dictationPhrases.pop();
+    if (last) this.dictationHistory.pop();
+    return last;
   }
 
   pushDictationUnit(text: string): void {

@@ -40,6 +40,15 @@ export interface HarnessConfig {
   obsWebSocketUrl?: string;
   protectedFileGlobs?: string[];
   appTestFlows?: HarnessAppTestFlow[];
+  sttProviderId?: string;
+  sttModel?: string;
+  sttLanguage?: string;
+  sttFallbackProviderId?: string;
+  speechInboxPath?: string;
+  speechInboxEnabled?: boolean;
+  onboardingCompleted?: boolean;
+  /** AI backend: `openai` (default) or `fake` for deterministic tests. Overridden by DRIFTCODE_AI_PROVIDER=fake. */
+  aiProviderId?: 'openai' | 'fake';
 }
 
 export interface HarnessAppTestStep {
@@ -148,6 +157,7 @@ export interface DashboardState {
   activeAiTask?: DashboardActiveAiTask;
   pendingPatchSummary?: string;
   recentEvents?: RuntimeEvent[];
+  speechStatus?: { pttActive: boolean; providerId: string; inboxPath: string; lastTranscript?: string };
   startedAt: string;
   updatedAt: string;
 }

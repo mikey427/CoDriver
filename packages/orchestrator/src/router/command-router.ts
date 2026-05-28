@@ -5,8 +5,8 @@ import {
   ModeId,
   RuntimeEventSeverity,
   RuntimeSubsystem,
+  FocusTarget,
 } from '@driftcode/shared';
-import type { DashboardCommandHistoryEntry, ToolRequest, ToolResult, UtteranceResponse } from '@driftcode/shared';
 import type { AiIntentLayer } from '../ai/ai-intent-layer.js';
 import type { BrowserAdapter } from '../adapters/browser-adapter.js';
 import type { TerminalAdapter } from '../adapters/terminal-adapter.js';
@@ -25,9 +25,12 @@ import type { AudioFeedback } from '../services/audio-feedback.js';
 import type { DevServerManager } from '../services/dev-server-manager.js';
 import type { PatchStore } from '../services/patch-store.js';
 import type { ObsAdapter } from '../adapters/obs-adapter.js';
-import type { HarnessConfig } from '@driftcode/shared';
+import type { HarnessConfig, DashboardCommandHistoryEntry, ToolRequest, ToolResult, UtteranceResponse } from '@driftcode/shared';
 import { AppTestRunner } from '../services/app-test-runner.js';
 import { isProtectedPath } from '../services/protected-paths.js';
+import { validatePatch } from '../services/patch-validator.js';
+import { focusApplication } from '../services/speech-input-service.js';
+import { redactSecrets } from '../services/redact-secrets.js';
 
 export class CommandRouter {
   private riskClassifier = new RiskClassifier();
@@ -54,11 +57,20 @@ export class CommandRouter {
     this.appTestRunner = new AppTestRunner(config, browser);
   }
 
+  refreshConfig(config: HarnessConfig): void {
+    this.config = config;
+    this.appTestRunner = new AppTestRunner(config, this.browser);
+  }
+
   async processUtterance(rawText: string): Promise<UtteranceResponse> {
     this.eventBus.emit('utterance.received', { rawText }, { subsystem: RuntimeSubsystem.Speech });
 
     const utterance = this.normalizer.normalize(rawText);
-    this.session.lastNormalizedUtterance = utterance;
+    this.session.lastNormalizedUtterance = {
+      ...utterance,
+      rawText: this.session.streamPrivacyActive ? redactSecrets(utterance.rawText) : utterance.rawText,
+      normalizedText: this.session.streamPrivacyActive ? redactSecrets(utterance.normalizedText) : utterance.normalizedText,
+    };
     this.eventBus.emit('utterance.normalized', { utterance }, { subsystem: RuntimeSubsystem.Normalizer, utteranceId: utterance.id });
 
     if (utterance.isEmergencyPhrase) {
@@ -69,8 +81,8 @@ export class CommandRouter {
         utterance,
         intent: this.session.lastParsedIntent,
         toolResults: [{ success: result.success, message: result.output }],
-        blocked: false,
-        message: result.output,
+        blocked: true,
+        message: 'Emergency stop activated — say resume previous mode to continue',
       };
     }
 
@@ -84,9 +96,17 @@ export class CommandRouter {
       for (const req of aiResult.toolRequests) {
         toolResults.push(await this.dispatch(req, intent));
       }
-      this.audio.speakBrief(aiResult.summary);
+      if (aiResult.usedAi) {
+        this.audio.speakBrief(redactSecrets(aiResult.summary, this.session.streamPrivacyActive));
+      }
       if (aiResult.usedAi && this.patchStore.get()) this.audio.beep('confirm');
-      return { utterance, intent: this.session.lastParsedIntent, toolResults: toolResults.map((r) => ({ success: r.success, message: r.output, errorCode: r.errorCode })), blocked: false, message: aiResult.summary };
+      return {
+        utterance: this.session.lastNormalizedUtterance ?? utterance,
+        intent: this.session.lastParsedIntent,
+        toolResults: toolResults.map((r) => ({ success: r.success, message: r.output, errorCode: r.errorCode })),
+        blocked: false,
+        message: redactSecrets(aiResult.summary, this.session.streamPrivacyActive),
+      };
     }
 
     const results = await this.routeIntent(intent);
@@ -95,11 +115,21 @@ export class CommandRouter {
     else if (results.some((r) => !r.success && r.errorCode !== 'PENDING_CONFIRMATION')) this.audio.beep('error');
     this.auditLog.append('utterance', 'processed', { rawText, intentType: intent.intentType, success: !blocked });
 
+    const responseMessage =
+      intent.intentType === IntentType.AiRequest
+        ? results.find((r) => r.output)?.output
+        : undefined;
+
+    if (!blocked && intent.intentType !== IntentType.EmergencyStop) {
+      this.session.lastUtteranceForRepeat = rawText;
+    }
+
     return {
-      utterance,
+      utterance: this.session.lastNormalizedUtterance ?? utterance,
       intent: this.session.lastParsedIntent,
       toolResults: results.map((r) => ({ success: r.success, message: r.output, errorCode: r.errorCode })),
       blocked,
+      message: responseMessage,
     };
   }
 
@@ -157,6 +187,8 @@ export class CommandRouter {
         return [this.handleAudioControl(intent)];
       case IntentType.Noop:
         return [this.handleNoop(intent)];
+      case IntentType.FocusChange:
+        return [await this.handleFocusChange(intent)];
       default:
         return [createToolResult({
           toolRequest: createToolRequest({
@@ -243,6 +275,15 @@ export class CommandRouter {
           errorMessage: 'No pending patch',
         });
       }
+      const validation = validatePatch(patch, this.config);
+      if (!validation.valid) {
+        return createToolResult({
+          toolRequest: createToolRequest({ sessionId: this.session.sessionId, correlationId: uuidv4(), adapter: AdapterType.Vscode, action: 'applyPatch', parameters: {}, description: 'Apply patch', sourceId: intent.id }),
+          success: false,
+          errorCode: validation.errorCode,
+          errorMessage: validation.errorMessage,
+        });
+      }
       if (isProtectedPath(patch.path, this.config.protectedFileGlobs)) {
         return createToolResult({
           toolRequest: createToolRequest({ sessionId: this.session.sessionId, correlationId: uuidv4(), adapter: AdapterType.Vscode, action: 'applyPatch', parameters: {}, description: 'Apply patch', sourceId: intent.id }),
@@ -270,8 +311,8 @@ export class CommandRouter {
     }
 
     if (intent.slots.action === 'undoPhrase') {
-      const last = this.session.popLastDictationUnit();
-      if (!last) {
+      const hasPhrase = this.session.getLastDictationPhrase() || this.session.dictationHistory.length > 0;
+      if (!hasPhrase) {
         return createToolResult({
           toolRequest: createToolRequest({
             sessionId: this.session.sessionId,
@@ -287,7 +328,52 @@ export class CommandRouter {
           errorMessage: 'No dictation phrase to undo',
         });
       }
-      intent.slots = { action: 'undoPhrase', text: last };
+    }
+
+    if (intent.slots.action === 'replaceLastWord' || intent.slots.action === 'replaceLastPhrase') {
+      const req = createToolRequest({
+        sessionId: this.session.sessionId,
+        correlationId: uuidv4(),
+        adapter: AdapterType.Vscode,
+        action: String(intent.slots.action),
+        parameters: { replacement: intent.slots.replacement ?? intent.literalPayload },
+        description: intent.summary,
+        sourceId: intent.id,
+      });
+      const result = await this.dispatch(req, intent);
+      if (result.success) {
+        const last = this.session.getLastDictationPhrase();
+        if (last && intent.literalPayload) last.text = String(intent.literalPayload);
+      }
+      return result;
+    }
+
+    if (intent.slots.action === 'deleteLastWord' || intent.slots.action === 'repeatLastPhrase') {
+      const req = createToolRequest({
+        sessionId: this.session.sessionId,
+        correlationId: uuidv4(),
+        adapter: AdapterType.Vscode,
+        action: String(intent.slots.action),
+        parameters: { ...intent.slots },
+        description: intent.summary,
+        sourceId: intent.id,
+      });
+      const result = await this.dispatch(req, intent);
+      if (result.success && intent.slots.action === 'repeatLastPhrase') {
+        const last = this.session.getLastDictationPhrase();
+        if (last) {
+          this.session.pushDictationPhrase({
+            ...last,
+            id: uuidv4(),
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+      if (result.success && intent.slots.action === 'deleteLastWord') {
+        const last = this.session.getLastDictationPhrase();
+        if (last && result.output) last.text = result.output;
+      }
+      return result;
     }
 
     const classification = this.riskClassifier.classify(intent);
@@ -304,7 +390,8 @@ export class CommandRouter {
       description: intent.summary,
       sourceId: intent.id,
     });
-    return this.dispatch(req, intent);
+    const result = await this.dispatch(req, intent);
+    return result;
   }
 
   private async dispatchTerminal(intent: InternalParsedIntent) {
@@ -539,6 +626,38 @@ export class CommandRouter {
         message: `Current mode is ${this.session.activeModeDisplayName}`,
       });
     }
+    if (intent.slots.orchestratorAction === 'repeatLastCommand') {
+      const last = this.session.lastUtteranceForRepeat;
+      if (!last) {
+        return createToolResult({
+          toolRequest: createToolRequest({
+            sessionId: this.session.sessionId,
+            correlationId: uuidv4(),
+            adapter: AdapterType.Orchestrator,
+            action: 'repeat.last',
+            parameters: {},
+            description: 'Repeat last',
+            sourceId: intent.id,
+          }),
+          success: false,
+          errorCode: 'NOTHING_TO_REPEAT',
+          errorMessage: 'No prior utterance to repeat',
+        });
+      }
+      return createToolResult({
+        toolRequest: createToolRequest({
+          sessionId: this.session.sessionId,
+          correlationId: uuidv4(),
+          adapter: AdapterType.Orchestrator,
+          action: 'repeat.last',
+          parameters: { utterance: last },
+          description: `Repeat: ${last}`,
+          sourceId: intent.id,
+        }),
+        success: true,
+        message: `Repeated: ${last}`,
+      });
+    }
     if (intent.slots.action === 'cancelAi') {
       this.aiLayer.cancelActive();
       return createToolResult({
@@ -567,6 +686,25 @@ export class CommandRouter {
       }),
       success: true,
       message: intent.summary,
+    });
+  }
+
+  private async handleFocusChange(intent: InternalParsedIntent) {
+    const target = String(intent.slots.focusTarget ?? FocusTarget.Vscode);
+    this.session.focusTarget = target;
+    const outcome = await focusApplication(target);
+    return createToolResult({
+      toolRequest: createToolRequest({
+        sessionId: this.session.sessionId,
+        correlationId: uuidv4(),
+        adapter: AdapterType.Orchestrator,
+        action: 'focus.change',
+        parameters: { focusTarget: target },
+        description: intent.summary,
+        sourceId: intent.id,
+      }),
+      success: outcome.success,
+      message: outcome.message,
     });
   }
 

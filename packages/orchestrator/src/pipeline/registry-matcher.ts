@@ -40,6 +40,8 @@ const COMPILED: CompiledPattern[] = BUILTIN_VOICE_COMMANDS.flatMap((command) =>
     regex: patternToRegex(pattern),
   })),
 ).sort((a, b) => {
+  const catchDelta = Number(isCatchAllPattern(a.pattern)) - Number(isCatchAllPattern(b.pattern));
+  if (catchDelta !== 0) return catchDelta;
   const slotDelta = countSlots(a.pattern) - countSlots(b.pattern);
   if (slotDelta !== 0) return slotDelta;
   return b.pattern.length - a.pattern.length;
@@ -48,6 +50,13 @@ const COMPILED: CompiledPattern[] = BUILTIN_VOICE_COMMANDS.flatMap((command) =>
 function countSlots(pattern: string): number {
   return (pattern.match(/\{[^}]+\}/g) ?? []).length;
 }
+
+/** Single-slot patterns like `{symbol}` match everything — sort them last. */
+function isCatchAllPattern(pattern: string): boolean {
+  return /^\{\w+\}$/.test(pattern.trim());
+}
+
+import { getKnownSymbolAliases } from './code-grammar/symbol-map.js';
 
 function isAllowedInMode(command: VoiceCommand, modeId: string): boolean {
   if (command.allowedModeIds.includes(modeId)) return true;
@@ -65,11 +74,18 @@ export function matchRegistryCommand(text: string, modeId: string): RegistryMatc
   for (const entry of COMPILED) {
     if (!isAllowedInMode(entry.command, modeId)) continue;
     const result = entry.regex.exec(normalized);
-    if (!result?.groups) continue;
+    if (!result) continue;
 
     const slots: Record<string, string> = {};
-    for (const [key, value] of Object.entries(result.groups)) {
-      if (value != null) slots[key] = value.trim();
+    if (result.groups) {
+      for (const [key, value] of Object.entries(result.groups)) {
+        if (value != null) slots[key] = value.trim();
+      }
+    }
+
+    if (entry.command.id === 'editor.insertSymbol') {
+      const alias = (slots.symbol ?? normalized).toLowerCase();
+      if (!getKnownSymbolAliases().has(alias)) continue;
     }
 
     if (entry.pattern === 'run login flow' || (entry.command.id === 'browser.runFlow' && normalized === 'run login flow')) {

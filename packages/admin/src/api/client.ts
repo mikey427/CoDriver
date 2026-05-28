@@ -4,12 +4,19 @@ import type {
   DashboardState,
   EventsQuery,
   EventsResponse,
+  HarnessAppTestFlow,
   HarnessConfig,
   ModesResponse,
+  OnboardingProgress,
+  OnboardingResponse,
+  OnboardingStepId,
   OpenAiSettingsView,
+  PracticeResult,
   RuntimeEvent,
   SafetyView,
+  SttProvidersResponse,
   SttSettingsView,
+  TranscribeResponse,
 } from './types';
 
 const DEFAULT_BASE = 'http://127.0.0.1:17345';
@@ -84,12 +91,18 @@ function mapConfigToSafety(config: HarnessConfig): SafetyView {
   };
 }
 
-function mapConfigToStt(config: HarnessConfig): SttSettingsView {
+function mapConfigToStt(
+  config: HarnessConfig,
+  whisperAvailable = false,
+): SttSettingsView {
   return {
-    providerId: 'default',
+    providerId: config.sttProviderId ?? 'http-inbox',
+    sttModel: config.sttModel ?? 'whisper-1',
+    sttLanguage: config.sttLanguage ?? 'en',
     wakePhraseEnabled: false,
     customVocabulary: config.customVocabulary,
     speechCorrections: config.speechCorrections,
+    whisperAvailable,
   };
 }
 
@@ -201,10 +214,14 @@ export const api = {
 
   async updateSttSettings(settings: Partial<SttSettingsView>): Promise<SttSettingsView> {
     const partial: Partial<HarnessConfig> = {};
+    if (settings.providerId) partial.sttProviderId = settings.providerId;
+    if (settings.sttModel) partial.sttModel = settings.sttModel;
+    if (settings.sttLanguage) partial.sttLanguage = settings.sttLanguage;
     if (settings.customVocabulary) partial.customVocabulary = settings.customVocabulary;
     if (settings.speechCorrections) partial.speechCorrections = settings.speechCorrections;
     const { config } = await api.updateConfig(partial);
-    return mapConfigToStt(config);
+    const speech = await api.getSpeechStatus().catch(() => null);
+    return mapConfigToStt(config, speech?.whisperAvailable ?? false);
   },
 
   async updateOpenAiSettings(settings: {
@@ -220,6 +237,87 @@ export const api = {
     }
     const { config } = await api.updateConfig(partial);
     return mapConfigToOpenAi(config);
+  },
+
+  getAppTestFlows(): Promise<{ flows: HarnessAppTestFlow[] }> {
+    return request<{ flows: HarnessAppTestFlow[] }>('/api/app-test/flows');
+  },
+
+  saveAppTestFlows(flows: HarnessAppTestFlow[]): Promise<{ flows: HarnessAppTestFlow[] }> {
+    return request<{ flows: HarnessAppTestFlow[] }>('/api/app-test/flows', {
+      method: 'PUT',
+      body: JSON.stringify({ flows }),
+    });
+  },
+
+  getSpeechStatus(): Promise<{
+    connected: boolean;
+    pttActive: boolean;
+    providerId: string;
+    inboxPath: string;
+    whisperAvailable?: boolean;
+  }> {
+    return request('/api/speech/status');
+  },
+
+  getSttProviders(): Promise<SttProvidersResponse> {
+    return request<SttProvidersResponse>('/api/stt/providers');
+  },
+
+  transcribe(
+    audioBase64: string,
+    mimeType: string,
+    processAsCommand = false,
+  ): Promise<TranscribeResponse> {
+    return request<TranscribeResponse>('/api/speech/transcribe', {
+      method: 'POST',
+      body: JSON.stringify({ audioBase64, mimeType, processAsCommand }),
+    });
+  },
+
+  getOnboarding(): Promise<OnboardingResponse> {
+    return request<OnboardingResponse>('/api/onboarding');
+  },
+
+  completeOnboardingStep(stepId: OnboardingStepId): Promise<{ progress: OnboardingProgress; isComplete: boolean }> {
+    return request('/api/onboarding/step', {
+      method: 'POST',
+      body: JSON.stringify({ stepId, completed: true }),
+    });
+  },
+
+  advanceOnboarding(): Promise<{ progress: OnboardingProgress; nextStep: OnboardingStepId }> {
+    return request('/api/onboarding/advance', { method: 'POST', body: '{}' });
+  },
+
+  dismissOnboarding(): Promise<{ progress: OnboardingProgress }> {
+    return request('/api/onboarding/dismiss', { method: 'POST', body: '{}' });
+  },
+
+  resetOnboarding(): Promise<{ progress: OnboardingProgress }> {
+    return request('/api/onboarding/reset', { method: 'POST', body: '{}' });
+  },
+
+  runMicTest(audioBase64: string, mimeType: string): Promise<{
+    passed: boolean;
+    transcript: string;
+    progress: OnboardingProgress;
+  }> {
+    return request('/api/onboarding/mic-test', {
+      method: 'POST',
+      body: JSON.stringify({ audioBase64, mimeType }),
+    });
+  },
+
+  getTutorialLessons(): Promise<{ lessons: import('./types').TutorialLesson[]; completedIds: string[] }> {
+    return request('/api/tutorial/lessons');
+  },
+
+  runTutorialPractice(lessonId: string, text: string, dryRun = true): Promise<PracticeResult & { completedIds: string[] }> {
+    return request('/api/tutorial/practice', {
+      method: 'POST',
+      body: JSON.stringify({ lessonId, text, dryRun }),
+    });
   },
 };
 

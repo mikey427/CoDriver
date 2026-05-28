@@ -232,6 +232,35 @@ export function Dashboard() {
         </div>
       </div>
 
+          {state.speechStatus && (
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <div className="card-header">
+                <h2 className="card-title">Speech Input</h2>
+                <StatusPill status={state.adapterHealth.stt ?? 'disconnected'} />
+              </div>
+              <dl style={{ margin: 0 }}>
+                <div className="kv-row">
+                  <dt>Provider</dt>
+                  <dd>{state.speechStatus.providerId}</dd>
+                </div>
+                <div className="kv-row">
+                  <dt>Inbox</dt>
+                  <dd className="mono" style={{ fontSize: '0.75rem' }}>{state.speechStatus.inboxPath}</dd>
+                </div>
+                <div className="kv-row">
+                  <dt>PTT</dt>
+                  <dd>{state.speechStatus.pttActive ? 'Active' : 'Idle'}</dd>
+                </div>
+                {state.speechStatus.lastTranscript && (
+                  <div className="kv-row">
+                    <dt>Last transcript</dt>
+                    <dd>{state.speechStatus.lastTranscript}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          )}
+
       <div className="card" style={{ marginTop: '1rem' }}>
         <div className="card-header">
           <h2 className="card-title">Command History</h2>

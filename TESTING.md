@@ -30,8 +30,38 @@ The orchestrator listens on `http://127.0.0.1:17345`.
 | `/api/utterance` | Inject voice text (HTTP test path) |
 | `/api/dashboard/state` | Dashboard state JSON |
 | `/api/health` | Liveness check |
+| `/api/onboarding` | Setup wizard state |
+| `/api/tutorial/lessons` | Voice command tutorial |
+| `/api/speech/transcribe` | Mic audio → Whisper (base64 WebM) |
+| `/api/stt/providers` | Available STT providers |
 
-## VS Code extension (optional for editor commands)
+## Onboarding wizard & tutorial
+
+Open **http://127.0.0.1:17345/admin/onboarding** after `npm start`.
+
+The wizard walks through:
+
+1. Prerequisites (orchestrator, OpenAI key, STT, VS Code)
+2. STT provider selection (HTTP inbox, OpenAI Whisper, or manual/typed)
+3. Microphone test (Whisper — hold-to-record in the browser)
+4. Interactive tutorial (9 lessons with dry-run parsing)
+
+Practice anytime at **http://127.0.0.1:17345/admin/tutorial**.
+
+For Whisper mic transcription:
+
+1. Set `openAiApiKey` in `.driftcode/config.json` (or via Settings / wizard)
+2. Set `sttProviderId` to `openai-whisper`
+3. Ensure optional peer: `npm install openai` (included by `npm run setup`)
+
+Test tutorial parsing via API:
+
+```bash
+curl -X POST http://127.0.0.1:17345/api/tutorial/practice \
+  -H 'Content-Type: application/json' \
+  -d '{"lessonId":"switch-command","text":"switch command mode","dryRun":true}'
+```
+
 
 1. Build: `npm run build:extension`
 2. Press F5 in `packages/vscode-extension` or install the VSIX
@@ -41,11 +71,18 @@ Without the extension, orchestrator commands still work; editor/ dictation actio
 
 ## Speech input
 
-MVP testing uses **HTTP utterance injection** (no mic/STT required):
+Three ways to inject voice without a mic:
 
 ```bash
+# HTTP (same as test:utterance)
 npm run test:utterance -- "switch command mode"
-npm run test:utterance -- "const user equals await get user open paren id close paren"
+
+# Speech inbox — drop file in .driftcode/inbox/ (watched automatically)
+npm run speech:send -- "switch command mode"
+
+# PTT API — for button/automation integrations
+curl -X POST http://127.0.0.1:17345/api/speech/ptt/down
+curl -X POST http://127.0.0.1:17345/api/speech/ptt/up -H 'Content-Type: application/json' -d '{"text":"save file"}'
 ```
 
 Set `DRIFTCODE_URL` to target a remote orchestrator.
@@ -54,9 +91,24 @@ Set `DRIFTCODE_URL` to target a remote orchestrator.
 
 With the orchestrator running:
 
+Full phrase reference: [docs/PHASE2-GRAMMAR.md](docs/PHASE2-GRAMMAR.md)
+
 ```bash
+npm run test:grammar      # Phase 2 unit tests (no orchestrator)
+npm run test:corrections  # correction registry mapping
+npm run test:phase2       # simulated editing session
+npm run test:core-loop    # Phase 1 acceptance (fake AI, emergency, patch flow)
 npm run test:mvp        # 8 smoke checks (health, modes, dictation, emergency, admin, overlay)
 npm run test:benchmark  # 30 deterministic registry commands (~80% intent match required)
+npm run audit:registry  # built-in command registry ↔ intent mapper audit (run after build)
+```
+
+### Fake AI for core-loop tests
+
+```bash
+DRIFTCODE_AI_PROVIDER=fake npm start
+# or PUT aiProviderId=fake via /api/config — see docs/STATUS.md
+npm run test:core-loop
 ```
 
 ## Configuration

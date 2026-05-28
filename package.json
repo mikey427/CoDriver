@@ -15,6 +15,12 @@
     "setup": "node scripts/setup.mjs",
     "test:utterance": "node scripts/test-utterance.mjs",
     "test:mvp": "node scripts/test-mvp.mjs",
-    "test:benchmark": "node scripts/test-benchmark.mjs"
+    "test:core-loop": "node scripts/test-core-loop.mjs",
+    "test:grammar": "npm run build -w @driftcode/orchestrator && node --test packages/orchestrator/dist/pipeline/code-grammar/code-emitter.test.js",
+    "test:corrections": "node scripts/test-corrections.mjs",
+    "test:phase2": "node scripts/test-phase2.mjs",
+    "test:benchmark": "node scripts/test-benchmark.mjs",
+    "audit:registry": "node scripts/audit-registry.mjs",
+    "speech:send": "node scripts/speech-inbox.mjs"
   }
 }

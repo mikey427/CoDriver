@@ -33,12 +33,16 @@ export function buildDashboardState(
   vscode: VscodeAdapter,
   aiLayer: AiIntentLayer,
   obs?: { isConnected(): boolean },
+  speech?: { getStatus(): { pttActive: boolean; providerId: string; inboxPath: string; lastTranscript?: string }; getConnectionHealth(): import('@driftcode/shared').ConnectionHealth },
 ): DashboardState {
   const health = defaultAdapterHealth();
   health.vscode = vscode.getConnectionHealth();
   health.openai = aiLayer.isEnabledForMode(session.activeModeId) ? ConnectionHealth.Connected : ConnectionHealth.Disconnected;
   health.browser = session.browserState.connected ? ConnectionHealth.Connected : ConnectionHealth.Disconnected;
   health.obs = obs?.isConnected() ? ConnectionHealth.Connected : ConnectionHealth.Disconnected;
+  health.stt = speech?.getConnectionHealth() ?? ConnectionHealth.Disconnected;
+
+  const speechStatus = speech?.getStatus();
 
   return {
     sessionId: session.sessionId,
@@ -65,6 +69,14 @@ export function buildDashboardState(
     eventSequence: eventBus.getSequence(),
     commandHistory: session.commandHistory,
     recentEvents: eventBus.getRecentEvents(50),
+    speechStatus: speechStatus
+      ? {
+          pttActive: speechStatus.pttActive,
+          providerId: speechStatus.providerId,
+          inboxPath: speechStatus.inboxPath,
+          lastTranscript: speechStatus.lastTranscript,
+        }
+      : undefined,
     startedAt: session.startedAt,
     updatedAt: new Date().toISOString(),
   };

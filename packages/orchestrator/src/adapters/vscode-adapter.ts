@@ -20,12 +20,17 @@ import type { Session } from '../session.js';
 import { createToolResult } from '../helpers/factories.js';
 import type pino from 'pino';
 import { mapToSessionEditorState } from './editor-state-mapper.js';
+import type { DictationPhraseRecord } from '../pipeline/code-grammar/grammar-types.js';
 
 const ACTION_TO_COMMAND: Record<string, string> = {
   insertText: 'editor.insertText',
   deleteLine: 'editor.deleteLine',
   selectFunction: 'editor.selectFunction',
   undoPhrase: 'editor.phraseUndo',
+  replaceLastPhrase: 'editor.replaceLastPhrase',
+  replaceLastWord: 'editor.replaceLastWord',
+  deleteLastWord: 'editor.deleteLastWord',
+  repeatLastPhrase: 'editor.repeatLastPhrase',
   undo: 'editor.undo',
   save: 'editor.save',
   navigate: 'editor.navigate',
@@ -173,7 +178,30 @@ export class VscodeAdapter {
 
       const literal = request.parameters.literalPayload;
       if (literal && commandId === 'editor.insertText' && result.success !== false) {
-        this.session.pushDictationUnit(String(literal));
+        const structured = result as {
+          insertedRange?: DictationPhraseRecord['range'];
+          insertedText?: string;
+          phraseRecordId?: string;
+        };
+        const docUri = this.session.editorState.activeFilePath
+          ? `file://${this.session.editorState.activeFilePath}`
+          : this.session.workspaceRoot ?? '';
+        if (structured.insertedRange && structured.insertedText) {
+          this.session.pushDictationPhrase({
+            id: structured.phraseRecordId ?? request.correlationId,
+            text: structured.insertedText,
+            documentUri: docUri,
+            range: structured.insertedRange,
+            timestamp: new Date().toISOString(),
+            modeId: String(this.session.activeModeId),
+          });
+        } else if (literal) {
+          this.session.pushDictationUnit(String(literal));
+        }
+      }
+
+      if (commandId === 'editor.phraseUndo' && result.success !== false) {
+        this.session.popLastDictationPhrase();
       }
 
       return createToolResult({

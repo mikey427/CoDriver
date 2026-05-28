@@ -9,6 +9,7 @@ import {
 import type { VoiceCommand } from '@driftcode/shared';
 import type { InternalParsedIntent, InternalUtterance } from '../helpers/factories.js';
 import type { RegistryMatch } from './registry-matcher.js';
+import { emitDictationSlot } from './code-grammar/code-emitter.js';
 
 const TRANSFORM_ACTIONS: Record<string, string> = {
   'editor.deleteLine': 'deleteLine',
@@ -120,6 +121,15 @@ export function intentFromRegistryMatch(
     return baseIntent(utterance, IntentType.ConfirmationResponse, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, confirmAction }, command.id);
   }
 
+  if (action === 'set_focus') {
+    const focusTarget = command.id.includes('browser') ? 'browser' : command.id.includes('terminal') ? 'terminal' : 'vscode';
+    return baseIntent(utterance, IntentType.FocusChange, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, focusTarget }, command.id);
+  }
+
+  if (action === 'status') {
+    return baseIntent(utterance, IntentType.Noop, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, orchestratorAction: command.id.includes('whatMode') ? 'getMode' : 'status' }, command.id);
+  }
+
   if (action === 'getMode') {
     return baseIntent(utterance, IntentType.Noop, 'Current mode query', AdapterType.Orchestrator, confidence, { ...registrySlots, orchestratorAction: 'getMode' }, command.id);
   }
@@ -129,8 +139,16 @@ export function intentFromRegistryMatch(
     return baseIntent(utterance, IntentType.Cancel, on ? 'Privacy on' : 'Privacy off', AdapterType.Orchestrator, confidence, { ...registrySlots, ...(on ? { privacyOn: true } : { privacyOff: true }) }, command.id);
   }
 
-  if (action === 'stop_tts') {
-    return baseIntent(utterance, IntentType.AudioControl, 'Stop talking', AdapterType.Orchestrator, confidence, { ...registrySlots, audioAction: 'stopTts' }, command.id);
+  if (action === 'stop_tts' || action === 'mute_stream_narration') {
+    return baseIntent(utterance, IntentType.AudioControl, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, audioAction: 'stopTts' }, command.id);
+  }
+
+  if (action === 'set_overlay_layout' || action === 'set_verbosity') {
+    return baseIntent(utterance, IntentType.Noop, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, orchestratorAction: action }, command.id);
+  }
+
+  if (action === 'repeat_last') {
+    return baseIntent(utterance, IntentType.Noop, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, orchestratorAction: 'repeatLastCommand' }, command.id);
   }
 
   if (action === 'create_ai_task') {
@@ -147,6 +165,44 @@ export function intentFromRegistryMatch(
 
   if (action === 'phraseUndo') {
     return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Vscode, confidence, { ...registrySlots, action: 'undoPhrase' }, command.id);
+  }
+
+  if (action === 'replaceLastWord') {
+    const raw = slots.text ?? '';
+    const emitted = emitDictationSlot(raw);
+    return baseIntent(
+      utterance,
+      IntentType.EditorTransform,
+      command.displayName,
+      AdapterType.Vscode,
+      confidence,
+      { ...registrySlots, action: 'replaceLastWord', replacement: emitted.success ? emitted.text : raw },
+      command.id,
+      emitted.success ? emitted.text : raw,
+    );
+  }
+
+  if (action === 'replaceLastPhrase') {
+    const raw = slots.text ?? '';
+    const emitted = emitDictationSlot(raw);
+    return baseIntent(
+      utterance,
+      IntentType.EditorTransform,
+      command.displayName,
+      AdapterType.Vscode,
+      confidence,
+      { ...registrySlots, action: 'replaceLastPhrase', replacement: emitted.success ? emitted.text : raw },
+      command.id,
+      emitted.success ? emitted.text : raw,
+    );
+  }
+
+  if (action === 'deleteLastWord') {
+    return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Vscode, confidence, { ...registrySlots, action: 'deleteLastWord' }, command.id);
+  }
+
+  if (action === 'repeatLastPhrase') {
+    return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Vscode, confidence, { ...registrySlots, action: 'repeatLastPhrase' }, command.id);
   }
 
   if (action === 'undo' || action === 'redo' || action === 'save') {
@@ -176,8 +232,10 @@ export function intentFromRegistryMatch(
   }
 
   if (action === 'insertText') {
-    const text = slots.text ?? slots.symbol ?? utterance.normalizedText;
-    return baseIntent(utterance, IntentType.Dictation, `Insert ${text}`, AdapterType.Vscode, confidence, registrySlots, command.id, text);
+    const raw = slots.text ?? slots.symbol ?? utterance.normalizedText;
+    const emitted = emitDictationSlot(raw);
+    const text = emitted.success ? emitted.text : raw;
+    return baseIntent(utterance, IntentType.Dictation, `Insert ${text}`, AdapterType.Vscode, emitted.success ? emitted.confidence : confidence, registrySlots, command.id, text);
   }
 
   if (action === 'run_command' || action === 'kill_process') {

@@ -67,6 +67,9 @@ export interface EditorResult {
   description?: string;
   undoGroupId?: string;
   affectedUris?: string[];
+  insertedRange?: Range;
+  insertedText?: string;
+  phraseRecordId?: string;
 }
 
 export interface JsonRpcRequest {

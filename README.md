@@ -1,6 +1,8 @@
 # DriftCode Harness
 
-Voice-first AI computer-control and coding harness for hands-free development while sim drifting live on stream.
+Voice-first coding/control harness for hands-free development while sim drifting live on stream.
+
+**Status:** Phase 1 core loop is testable; see [docs/STATUS.md](docs/STATUS.md) for an honest breakdown of what works vs scaffold.
 
 ## Quick start
 
@@ -12,8 +14,13 @@ npm start
 See [TESTING.md](TESTING.md) for the full test guide.
 
 ```bash
+npm run test:core-loop  # Phase 1 acceptance (fake AI, emergency, patch flow)
+npm run test:grammar    # Phase 2 grammar unit tests (no orchestrator)
+npm run test:corrections
+npm run test:phase2     # simulated manual dictation session
 npm run test:mvp        # smoke tests (orchestrator must be running)
 npm run test:benchmark  # 30+ registry command benchmark
+npm run audit:registry  # registry ↔ intent mapper audit
 ```
 
 | URL | Purpose |
@@ -43,24 +50,38 @@ npm run test:utterance -- "privacy on"
 npm run test:utterance -- "emergency stop"
 ```
 
+## Fake AI (no OpenAI key)
+
+For local acceptance tests without network:
+
+```bash
+# Option A: env var
+DRIFTCODE_AI_PROVIDER=fake npm start
+
+# Option B: config API
+curl -X PUT http://127.0.0.1:17345/api/config \
+  -H 'Content-Type: application/json' \
+  -d '{"aiProviderId":"fake","openAiApiKey":"test"}'
+```
+
+Then: `npm run test:core-loop`
+
 ## Optional capabilities
 
-Install peers for full Phase 2–4 features:
+Install peers for extended features:
 
 ```bash
 npm install openai playwright obs-websocket-js -w @driftcode/orchestrator
 npx playwright install chromium
 ```
 
-Set `openAiApiKey` in `~/.driftcode/config.json` or via admin Settings.
-
-Enable OBS: set `"obsEnabled": true` in config (OBS WebSocket on port 4455).
+Set `openAiApiKey` and `aiProviderId: "openai"` in `~/.driftcode/config.json` for real OpenAI.
 
 ## Architecture
 
 - **Deterministic path** — dictation, modes, editor/terminal/browser commands (no LLM)
-- **AI path** — OpenAI with editor context → pending patch → `"apply the fix"`
-- **Command router** — all actions through risk classifier + audit log
+- **AI path** — OpenAI or fake provider → validated pending patch → `"apply the fix"`
+- **Command router** — all actions through risk classifier + audit log; emergency stop blocks adapters and AI
 
 ## Project structure
 
@@ -70,6 +91,7 @@ packages/orchestrator/     Runtime, adapters, AI, safety
 packages/admin/            React control panel
 packages/vscode-extension/ Editor adapter
 overlay/                   Stream debug overlay
+docs/STATUS.md             Honest implementation status
 docs/DRIFTCODE-HARNESS-SPEC.md
 ```
 
@@ -77,10 +99,10 @@ docs/DRIFTCODE-HARNESS-SPEC.md
 
 | Phase | Status |
 |-------|--------|
-| 0–1 PoC + coding loop | **Testable** — registry matcher, modes, emergency stop, admin, overlay |
-| 2 AI assist | Testable — context-aware patches, apply workflow (needs `openAiApiKey`) |
-| 3 App testing | Testable — dev server, Playwright, sample `appTestFlows` |
-| 4 Streaming | Partial — OBS adapter, audio beep/TTS, privacy mode |
-| 5 V1 reliability | Planned — profiles, flow library, onboarding wizard |
+| **1 Core loop** | **Testable** — `test:core-loop`, fake AI, patch validation, emergency stop, registry audit |
+| **2 Manual coding grammar** | **Testable** — deterministic TS/web phrases, corrections, `test:grammar` |
+| 3 App testing | Playwright flows (optional peer) |
+| 4 Streaming | Partial — OBS adapter, privacy flag, overlay |
+| 5 STT / hardware / V1 | Scaffold or planned — see [docs/STATUS.md](docs/STATUS.md) |
 
 Full spec: [docs/DRIFTCODE-HARNESS-SPEC.md](docs/DRIFTCODE-HARNESS-SPEC.md)

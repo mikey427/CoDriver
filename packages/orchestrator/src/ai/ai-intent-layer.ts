@@ -11,10 +11,14 @@ import type { HarnessConfig, ToolRequest } from '@driftcode/shared';
 import type { EventBus } from '../event-bus.js';
 import type { Session } from '../session.js';
 import type { CostTracker } from './cost-tracker.js';
-import type { InternalUtterance } from '../helpers/factories.js';
 import { createToolRequest } from '../helpers/factories.js';
+import type { InternalUtterance } from '../helpers/factories.js';
 import type { VscodeAdapter } from '../adapters/vscode-adapter.js';
 import type { PatchStore } from '../services/patch-store.js';
+import { validatePatch } from '../services/patch-validator.js';
+import type { AiProvider } from './ai-provider.js';
+import { FakeAiProvider } from './fake-ai-provider.js';
+import { OpenAiProvider } from './openai-ai-provider.js';
 import type pino from 'pino';
 
 const AI_MODES = new Set<ModeId | string>([
@@ -25,17 +29,16 @@ const AI_MODES = new Set<ModeId | string>([
   ModeId.Review,
 ]);
 
-interface AiPatchResponse {
-  summary?: string;
-  path?: string;
-  content?: string;
-  oldText?: string;
-  newText?: string;
-  toolRequests?: Array<{ adapter: string; action: string; params?: Record<string, unknown> }>;
+function resolveProviderId(config: HarnessConfig): string {
+  if (process.env.DRIFTCODE_AI_PROVIDER === 'fake') return 'fake';
+  return config.aiProviderId ?? 'openai';
 }
 
 export class AiIntentLayer {
-  private client: { chat: { completions: { create: (args: unknown) => Promise<unknown> } } } | null = null;
+  private openAi = new OpenAiProvider();
+  private fake = new FakeAiProvider();
+  private generation = 0;
+  private abortController: AbortController | null = null;
 
   constructor(
     private config: HarnessConfig,
@@ -48,25 +51,46 @@ export class AiIntentLayer {
   ) {}
 
   async initialize(): Promise<void> {
-    if (!this.config.openAiApiKey) return;
-    try {
-      const mod = await import('openai');
-      this.client = new mod.default({ apiKey: this.config.openAiApiKey }) as typeof this.client;
-    } catch {
-      this.log.warn('openai optional peer not installed — AI layer disabled');
+    if (resolveProviderId(this.config) === 'openai') {
+      const ok = await this.openAi.ensureClient(this.config);
+      if (!ok && this.config.openAiApiKey) {
+        this.log.warn('openai optional peer not installed — OpenAI AI layer disabled');
+      }
     }
   }
 
+  updateConfig(config: HarnessConfig): void {
+    this.config = config;
+    this.openAi.resetClient();
+    void this.initialize();
+  }
+
+  getProviderId(): string {
+    return resolveProviderId(this.config);
+  }
+
+  private getProvider(): AiProvider | null {
+    const id = resolveProviderId(this.config);
+    if (id === 'fake') return this.fake;
+    if (id === 'openai' && this.openAi.isAvailable(this.config)) return this.openAi;
+    return null;
+  }
+
   isEnabledForMode(modeId: ModeId | string): boolean {
-    return AI_MODES.has(modeId) && this.client != null;
+    if (!AI_MODES.has(modeId)) return false;
+    return this.getProvider() != null;
   }
 
   cancelActive(): void {
+    this.generation += 1;
+    this.abortController?.abort();
+    this.abortController = null;
     this.session.activeAiTask = undefined;
   }
 
   async process(utterance: InternalUtterance, prompt: string): Promise<{ toolRequests: ToolRequest[]; summary: string; usedAi: boolean }> {
-    if (!this.isEnabledForMode(this.session.activeModeId) || !this.client || this.session.emergencyStopActive) {
+    const provider = this.getProvider();
+    if (!this.isEnabledForMode(this.session.activeModeId) || !provider || this.session.emergencyStopActive) {
       return { toolRequests: [], summary: 'AI not available', usedAi: false };
     }
 
@@ -74,6 +98,11 @@ export class AiIntentLayer {
     if (this.session.sessionCostUsd >= budget) {
       return { toolRequests: [], summary: 'Session AI budget exceeded', usedAi: false };
     }
+
+    const callGeneration = this.generation;
+    this.abortController?.abort();
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
 
     this.session.activeAiTask = {
       summary: prompt.slice(0, 80),
@@ -87,42 +116,32 @@ export class AiIntentLayer {
       editorContext = ctxResult.context;
     }
 
+    if (callGeneration !== this.generation || this.session.emergencyStopActive) {
+      this.session.activeAiTask = undefined;
+      return { toolRequests: [], summary: 'AI cancelled', usedAi: false };
+    }
+
     try {
-      const response = (await this.client.chat.completions.create({
-        model: this.config.openAiModel,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a coding assistant for DriftCode Harness. Respond ONLY with JSON:
-{
-  "summary": "brief status for voice feedback (max 12 words)",
-  "path": "relative file path if patching",
-  "oldText": "exact text to replace (optional)",
-  "newText": "replacement text (optional)",
-  "content": "full file content (only for new/small files)",
-  "toolRequests": [{ "adapter": "terminal|browser", "action": "...", "params": {} }]
-}
-Never include secrets. Prefer oldText/newText patches over full content.`,
-          },
-          {
-            role: 'user',
-            content: `Request: ${prompt}\n\nEditor context:\n${editorContext.slice(0, 6000)}`,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        max_tokens: 800,
-      })) as { choices: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
+      const result = await provider.complete({
+        prompt,
+        editorContext,
+        config: this.config,
+        signal,
+      });
 
-      const parsed = JSON.parse(response.choices[0]?.message?.content ?? '{}') as AiPatchResponse;
+      if (callGeneration !== this.generation || this.session.emergencyStopActive || signal.aborted) {
+        this.session.activeAiTask = undefined;
+        return { toolRequests: [], summary: 'AI cancelled', usedAi: false };
+      }
 
-      if (response.usage) {
+      if (result.usage) {
         const usage = this.costTracker.record({
           sessionId: this.session.sessionId,
           profileId: this.session.activeProfileId,
-          model: this.config.openAiModel,
-          inputTokens: response.usage.prompt_tokens ?? 0,
-          outputTokens: response.usage.completion_tokens ?? 0,
-          totalTokens: response.usage.total_tokens ?? 0,
+          model: provider.id === 'fake' ? 'fake-ai' : this.config.openAiModel,
+          inputTokens: result.usage.promptTokens,
+          outputTokens: result.usage.outputTokens,
+          totalTokens: result.usage.totalTokens,
           modeId: this.session.activeModeId,
           utteranceId: utterance.id,
         });
@@ -134,23 +153,38 @@ Never include secrets. Prefer oldText/newText patches over full content.`,
       const correlationId = uuidv4();
       const toolRequests: ToolRequest[] = [];
 
-      if (parsed.path && (parsed.content != null || (parsed.oldText != null && parsed.newText != null))) {
+      if (result.patch) {
+        const validation = validatePatch(result.patch, this.config);
+        if (!validation.valid) {
+          this.session.activeAiTask = undefined;
+          this.log.warn({ error: validation.errorCode, path: result.patch.path }, 'Rejected invalid AI patch');
+          return {
+            toolRequests: [],
+            summary: validation.errorMessage ?? 'Invalid patch rejected',
+            usedAi: true,
+          };
+        }
         this.patchStore.set({
-          summary: parsed.summary ?? 'Patch ready',
-          path: parsed.path,
-          content: parsed.content,
-          oldText: parsed.oldText,
-          newText: parsed.newText,
+          summary: result.summary,
+          path: result.patch.path,
+          content: result.patch.content,
+          oldText: result.patch.oldText,
+          newText: result.patch.newText,
         });
-        this.session.pendingPatchSummary = parsed.summary ?? `Patch for ${parsed.path}`;
+        this.session.pendingPatchSummary = result.summary;
       }
 
-      for (const tr of parsed.toolRequests ?? []) {
+      for (const tr of result.toolRequests ?? []) {
         toolRequests.push(
           createToolRequest({
             sessionId: this.session.sessionId,
             correlationId,
-            adapter: tr.adapter === 'terminal' ? AdapterType.Terminal : tr.adapter === 'browser' ? AdapterType.Browser : AdapterType.Vscode,
+            adapter:
+              tr.adapter === 'terminal'
+                ? AdapterType.Terminal
+                : tr.adapter === 'browser'
+                  ? AdapterType.Browser
+                  : AdapterType.Vscode,
             action: tr.action,
             parameters: tr.params ?? {},
             description: tr.action,
@@ -161,14 +195,18 @@ Never include secrets. Prefer oldText/newText patches over full content.`,
       }
 
       this.session.activeAiTask = {
-        summary: parsed.summary ?? 'Done',
+        summary: result.summary,
         taskType: AiTaskType.CodeAssist,
         status: AiTaskStatus.Completed,
       };
 
-      const summary = parsed.summary ?? (this.patchStore.get() ? 'Patch ready. Say apply the fix.' : 'AI response ready');
+      const summary = result.summary ?? (this.patchStore.get() ? 'Patch ready. Say apply the fix.' : 'AI response ready');
       return { toolRequests, summary, usedAi: true };
     } catch (err) {
+      if (callGeneration !== this.generation || signal.aborted) {
+        this.session.activeAiTask = undefined;
+        return { toolRequests: [], summary: 'AI cancelled', usedAi: false };
+      }
       this.session.activeAiTask = undefined;
       return { toolRequests: [], summary: err instanceof Error ? err.message : 'AI failed', usedAi: false };
     }

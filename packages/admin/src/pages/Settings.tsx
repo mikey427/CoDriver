@@ -1,10 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
-import type { OpenAiSettingsView, SttSettingsView } from '@/api/types';
+import type { OpenAiSettingsView, SttProviderInfo, SttSettingsView } from '@/api/types';
 
 export function Settings() {
   const [openAi, setOpenAi] = useState<OpenAiSettingsView | null>(null);
   const [stt, setStt] = useState<SttSettingsView | null>(null);
+  const [providers, setProviders] = useState<SttProviderInfo[]>([]);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -15,13 +17,15 @@ export function Settings() {
     let cancelled = false;
     (async () => {
       try {
-        const [ai, speech] = await Promise.all([
+        const [ai, speech, prov] = await Promise.all([
           api.getOpenAiSettings(),
           api.getSttSettings(),
+          api.getSttProviders(),
         ]);
         if (!cancelled) {
           setOpenAi(ai);
           setStt(speech);
+          setProviders(prov.providers);
           setError(null);
         }
       } catch (err) {
@@ -45,6 +49,9 @@ export function Settings() {
     try {
       const [nextStt, nextAi] = await Promise.all([
         api.updateSttSettings({
+          providerId: stt.providerId,
+          sttModel: stt.sttModel,
+          sttLanguage: stt.sttLanguage,
           customVocabulary: stt.customVocabulary,
           speechCorrections: stt.speechCorrections,
         }),
@@ -62,6 +69,8 @@ export function Settings() {
       setSaving(false);
     }
   }
+
+  const activeProvider = providers.find((p) => p.id === stt?.providerId);
 
   return (
     <>
@@ -116,19 +125,48 @@ export function Settings() {
               <>
                 <div className="field" style={{ marginBottom: '1rem' }}>
                   <label htmlFor="stt-provider">Provider</label>
-                  <input id="stt-provider" value={stt.providerId} readOnly />
+                  <select
+                    id="stt-provider"
+                    value={stt.providerId}
+                    onChange={(e) => setStt({ ...stt, providerId: e.target.value })}
+                  >
+                    {providers.map((p) => (
+                      <option key={p.id} value={p.id}>{p.displayName}</option>
+                    ))}
+                  </select>
+                  {activeProvider && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {activeProvider.description}
+                    </span>
+                  )}
                 </div>
-                <div className="field" style={{ marginBottom: '1rem' }}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={stt.wakePhraseEnabled}
-                      readOnly
-                      style={{ marginRight: '0.5rem' }}
-                    />
-                    Wake phrase (profile-gated)
-                  </label>
-                </div>
+                {stt.providerId === 'openai-whisper' && (
+                  <>
+                    <div className="field" style={{ marginBottom: '1rem' }}>
+                      <label htmlFor="stt-model">Whisper model</label>
+                      <input
+                        id="stt-model"
+                        value={stt.sttModel}
+                        onChange={(e) => setStt({ ...stt, sttModel: e.target.value })}
+                      />
+                    </div>
+                    <div className="field" style={{ marginBottom: '1rem' }}>
+                      <label htmlFor="stt-lang">Language</label>
+                      <input
+                        id="stt-lang"
+                        value={stt.sttLanguage}
+                        onChange={(e) => setStt({ ...stt, sttLanguage: e.target.value })}
+                        placeholder="en"
+                      />
+                    </div>
+                    <div className="kv-row" style={{ marginBottom: '1rem' }}>
+                      <dt>Whisper ready</dt>
+                      <dd style={{ color: stt.whisperAvailable ? 'var(--status-ok)' : 'var(--status-warn)' }}>
+                        {stt.whisperAvailable ? 'Yes' : 'No — set API key and install openai package'}
+                      </dd>
+                    </div>
+                  </>
+                )}
                 {stt.customVocabulary.length > 0 && (
                   <div style={{ marginBottom: '1rem' }}>
                     <div className="card-title" style={{ marginBottom: '0.5rem' }}>Custom vocabulary</div>
@@ -160,6 +198,11 @@ export function Settings() {
                     </table>
                   </div>
                 )}
+                <p style={{ fontSize: '0.8125rem', marginTop: '1rem' }}>
+                  <Link to="/onboarding">Run the setup wizard</Link>
+                  {' · '}
+                  <Link to="/tutorial">Practice voice commands</Link>
+                </p>
               </>
             )}
           </div>
