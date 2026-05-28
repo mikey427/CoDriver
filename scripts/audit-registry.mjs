@@ -26,6 +26,7 @@ const HANDLED_ADAPTER_ACTIONS = new Set([
   'redo',
   'save',
   'applyPatch',
+  'previewPatch',
   'select',
   'transform',
   'runVsCodeCommand',

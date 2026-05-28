@@ -60,6 +60,10 @@ export class IntentParser {
       return this.build(utterance, IntentType.EditorTransform, 'Apply pending patch', AdapterType.Vscode, 0.95, ConfidenceBand.High, { action: 'applyPatch' });
     }
 
+    if (text === 'preview patch' || text === 'show patch' || text === 'what is the fix') {
+      return this.build(utterance, IntentType.EditorTransform, 'Preview pending patch', AdapterType.Orchestrator, 0.95, ConfidenceBand.High, { action: 'previewPatch' });
+    }
+
     if (text === 'start dev server') {
       return this.build(utterance, IntentType.TerminalRun, 'Start dev server', AdapterType.Terminal, 0.95, ConfidenceBand.High, { devServer: true });
     }

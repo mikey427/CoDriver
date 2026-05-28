@@ -10,6 +10,9 @@ export type {
   RuntimeEvent,
   SttProviderInfo,
   TutorialLesson,
+  UtteranceResponse,
+  UtteranceSource,
+  PushToTalkState,
 } from '@driftcode/shared';
 
 import type {

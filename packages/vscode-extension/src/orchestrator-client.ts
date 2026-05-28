@@ -10,6 +10,7 @@ import {
   deleteLastWord,
 } from './commands/insert-text';
 import { navigate } from './commands/navigation';
+import { wrapInIf } from './commands/wrap-in-if';
 import { deleteLine, saveFile, selectFunction, selectLine, selectWord, undo, moveLineUp, moveLineDown, duplicateLine, commentLine, formatDocument } from './commands/structural';
 import type {
   ConnectionStatus,
@@ -165,6 +166,7 @@ export class OrchestratorClient implements vscode.Disposable {
         'editor.deleteLastWord',
         'editor.repeatLastPhrase',
         'editor.applyPatch',
+        'editor.wrapInIf',
         'editor.getSelectionContext',
         'editor.stateChanged',
       ],
@@ -268,6 +270,8 @@ export class OrchestratorClient implements vscode.Disposable {
         return commentLine();
       case 'editor.formatDocument':
         return formatDocument();
+      case 'editor.wrapInIf':
+        return wrapInIf(typeof params.condition === 'string' ? params.condition : undefined);
       case 'editor.navigate':
         return navigate(params as unknown as NavigateParams);
       case 'editor.undo':

@@ -2,7 +2,7 @@
 
 Voice-first coding/control harness for hands-free development while sim drifting live on stream.
 
-**Status:** Phase 1 core loop is testable; see [docs/STATUS.md](docs/STATUS.md) for an honest breakdown of what works vs scaffold.
+**Status:** Phase 2.5 hardening complete — deterministic grammar, corrections, patch preview, VS Code path documented. See [docs/STATUS.md](docs/STATUS.md).
 
 ## Quick start
 
@@ -18,6 +18,10 @@ npm run test:core-loop  # Phase 1 acceptance (fake AI, emergency, patch flow)
 npm run test:grammar    # Phase 2 grammar unit tests (no orchestrator)
 npm run test:corrections
 npm run test:phase2     # simulated manual dictation session
+npm run test:preview-patch  # patch preview (no apply)
+npm run test:ptt            # PTT endpoints
+npm run test:speech-input   # source + confidence
+npm run test:phase3         # Phase 3 acceptance
 npm run test:mvp        # smoke tests (orchestrator must be running)
 npm run test:benchmark  # 30+ registry command benchmark
 npm run audit:registry  # registry ↔ intent mapper audit
@@ -37,6 +41,10 @@ ln -sf "$(pwd)/packages/vscode-extension" ~/.vscode/extensions/driftcode-vscode-
 ```
 
 Reload VS Code. Default WebSocket: `ws://127.0.0.1:17345/ws/vscode`
+
+Hands-on walkthrough (no mic): [docs/MANUAL-DOGFOOD.md](docs/MANUAL-DOGFOOD.md)
+
+Experimental real speech: [docs/PHASE3-SPEECH-INPUT.md](docs/PHASE3-SPEECH-INPUT.md) — admin hold-to-talk (browser API).
 
 ## Test commands (no mic)
 

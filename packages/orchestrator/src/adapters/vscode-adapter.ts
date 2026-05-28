@@ -42,6 +42,7 @@ const ACTION_TO_COMMAND: Record<string, string> = {
   selectLine: 'editor.selectLine',
   selectWord: 'editor.selectWord',
   formatDocument: 'editor.formatDocument',
+  wrapInIf: 'editor.wrapInIf',
 };
 
 function toCommandId(action: string): string {
@@ -149,7 +150,8 @@ export class VscodeAdapter {
         toolRequest: request,
         success: false,
         errorCode: 'NOT_CONNECTED',
-        errorMessage: 'VS Code extension not connected',
+        errorMessage:
+          'VS Code extension not connected. Start the orchestrator (npm start), install the driftcode-vscode extension, open a workspace, and reload VS Code. Check the status bar shows Connected to ws://127.0.0.1:17345/ws/vscode.',
         durationMs: Date.now() - start,
       });
     }

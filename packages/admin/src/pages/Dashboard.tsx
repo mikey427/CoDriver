@@ -2,6 +2,7 @@ import { useOutletContext } from 'react-router-dom';
 import type { LayoutOutletContext } from '@/components/Layout';
 import { ConfidenceBar, PathBadge, StatusPill } from '@/components/ModeBadge';
 import { ModeBadge } from '@/components/ModeBadge';
+import { SpeechInputPanel } from '@/components/SpeechInputPanel';
 
 function formatTime(iso?: string): string {
   if (!iso) return '—';
@@ -117,6 +118,8 @@ export function Dashboard() {
                   <div className="mono">{utterance.normalizedText}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                     raw: {utterance.rawText} · {formatTime(utterance.timestamp)}
+                    {utterance.source ? ` · ${utterance.source}` : ''}
+                    {utterance.confidence != null ? ` · ${Math.round(utterance.confidence * 100)}% conf` : ''}
                   </div>
                 </>
               ) : (
@@ -235,31 +238,52 @@ export function Dashboard() {
           {state.speechStatus && (
             <div className="card" style={{ marginTop: '1rem' }}>
               <div className="card-header">
-                <h2 className="card-title">Speech Input</h2>
+                <h2 className="card-title">Input / PTT Status</h2>
                 <StatusPill status={state.adapterHealth.stt ?? 'disconnected'} />
               </div>
               <dl style={{ margin: 0 }}>
                 <div className="kv-row">
+                  <dt>PTT</dt>
+                  <dd>{state.pttState?.active || state.speechStatus.pttActive ? 'LISTENING' : 'Idle'}</dd>
+                </div>
+                {state.pttState?.source && (
+                  <div className="kv-row">
+                    <dt>PTT source</dt>
+                    <dd>{state.pttState.source}</dd>
+                  </div>
+                )}
+                <div className="kv-row">
+                  <dt>Last input source</dt>
+                  <dd>{state.speechStatus.lastInputSource ?? state.lastNormalizedUtterance?.source ?? '—'}</dd>
+                </div>
+                <div className="kv-row">
                   <dt>Provider</dt>
                   <dd>{state.speechStatus.providerId}</dd>
-                </div>
-                <div className="kv-row">
-                  <dt>Inbox</dt>
-                  <dd className="mono" style={{ fontSize: '0.75rem' }}>{state.speechStatus.inboxPath}</dd>
-                </div>
-                <div className="kv-row">
-                  <dt>PTT</dt>
-                  <dd>{state.speechStatus.pttActive ? 'Active' : 'Idle'}</dd>
                 </div>
                 {state.speechStatus.lastTranscript && (
                   <div className="kv-row">
                     <dt>Last transcript</dt>
-                    <dd>{state.speechStatus.lastTranscript}</dd>
+                    <dd>
+                      {state.speechStatus.lastTranscript}
+                      {state.speechStatus.lastTranscriptConfidence != null &&
+                        ` (${Math.round(state.speechStatus.lastTranscriptConfidence * 100)}%)`}
+                    </dd>
+                  </div>
+                )}
+                {state.lastBlockedLowConfidence && (
+                  <div className="kv-row">
+                    <dt>Blocked (low conf)</dt>
+                    <dd style={{ color: 'var(--status-warn)' }}>
+                      {state.lastBlockedLowConfidence.text.slice(0, 80)} (
+                      {Math.round(state.lastBlockedLowConfidence.confidence * 100)}%)
+                    </dd>
                   </div>
                 )}
               </dl>
             </div>
           )}
+
+      <SpeechInputPanel />
 
       <div className="card" style={{ marginTop: '1rem' }}>
         <div className="card-header">

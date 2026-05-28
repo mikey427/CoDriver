@@ -213,6 +213,10 @@ export function intentFromRegistryMatch(
     return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Vscode, confidence, { ...registrySlots, action: 'applyPatch' }, command.id);
   }
 
+  if (action === 'previewPatch') {
+    return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Orchestrator, confidence, { ...registrySlots, action: 'previewPatch' }, command.id);
+  }
+
   if (action === 'select') {
     const editorAction = SELECT_ACTIONS[command.id] ?? 'selectFunction';
     return baseIntent(utterance, IntentType.EditorTransform, command.displayName, AdapterType.Vscode, confidence, { ...registrySlots, action: editorAction }, command.id);

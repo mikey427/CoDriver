@@ -4,6 +4,18 @@ import { ALL_MODE_IDS, DEFAULT_MODE_CONFIGS, ModeId, RuntimeEventSeverity, Runti
 
 const ALLOWED_FROM_EMERGENCY = new Set<ModeId>([ModeId.Command, ModeId.ManualDictation]);
 
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function phraseMatches(normalized: string, phrase: string): boolean {
+  const p = phrase.toLowerCase().trim();
+  if (!p) return false;
+  if (normalized === p) return true;
+  if (p.includes(' ')) return normalized.includes(p);
+  return new RegExp(`\\b${escapeRegex(p)}\\b`).test(normalized);
+}
+
 export class ModeManager {
   constructor(
     private session: Session,
@@ -15,7 +27,7 @@ export class ModeManager {
     for (const modeId of ALL_MODE_IDS) {
       const config = DEFAULT_MODE_CONFIGS[modeId];
       for (const phrase of [...config.enterPhrases, `switch ${config.displayName.toLowerCase()}`, config.displayName.toLowerCase()]) {
-        if (normalized === phrase || normalized.includes(phrase)) {
+        if (phraseMatches(normalized, phrase)) {
           return modeId;
         }
       }

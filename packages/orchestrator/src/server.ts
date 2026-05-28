@@ -89,6 +89,7 @@ export async function createServer(): Promise<OrchestratorServer> {
   const practice = new PracticeEvaluator(normalizer, parser);
 
   const speech = new SpeechInputService(config, session, router, eventBus, log, configStore.getPath(), sttManager);
+  router.setSpeechInput(speech);
   if (config.speechInboxEnabled !== false) {
     speech.start();
   }
@@ -174,7 +175,8 @@ export async function createServer(): Promise<OrchestratorServer> {
       event.eventType.startsWith('tool.') ||
       event.eventType.startsWith('utterance.') ||
       event.eventType.startsWith('confirmation.') ||
-      event.eventType.startsWith('intent.')
+      event.eventType.startsWith('intent.') ||
+      event.eventType.startsWith('ptt.')
     ) {
       broadcastAdmin({
         type: 'dashboard.state',

@@ -11,6 +11,12 @@ import type {
   HarnessConfig,
   ToolResult,
 } from '@driftcode/shared';
+import type {
+  BlockedLowConfidenceRecord,
+  PushToTalkState,
+  SpeechInputUtterance,
+} from '@driftcode/shared';
+import { UtteranceSource } from '@driftcode/shared';
 import type { EditorState } from '@driftcode/shared';
 import type { DictationPhraseRecord } from './pipeline/code-grammar/grammar-types.js';
 import {
@@ -50,6 +56,11 @@ export class Session {
   lastUtteranceForRepeat?: string;
   activeAiTask?: { summary: string; taskType: string; status: string };
   pendingPatchSummary?: string;
+  pushToTalkState: PushToTalkState = { active: false, source: 'unknown' };
+  lastInputSource: UtteranceSource = UtteranceSource.Unknown;
+  lastSpeechConfidence?: number;
+  lastSpeechInput?: SpeechInputUtterance;
+  lastBlockedLowConfidence?: BlockedLowConfidenceRecord;
 
   constructor(config: HarnessConfig) {
     this.sessionId = uuidv4();

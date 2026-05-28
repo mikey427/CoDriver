@@ -6,6 +6,8 @@ import type { Session } from '../session.js';
 import type { VscodeAdapter } from '../adapters/vscode-adapter.js';
 import type { AiIntentLayer } from '../ai/ai-intent-layer.js';
 import { defaultAdapterHealth } from '../helpers/factories.js';
+import { redactSecrets } from '../services/redact-secrets.js';
+import type { SpeechInputStatus } from '../services/speech-input-service.js';
 
 function toDashboardEditor(session: Session): DashboardEditorState | undefined {
   const e = session.editorState;
@@ -33,7 +35,7 @@ export function buildDashboardState(
   vscode: VscodeAdapter,
   aiLayer: AiIntentLayer,
   obs?: { isConnected(): boolean },
-  speech?: { getStatus(): { pttActive: boolean; providerId: string; inboxPath: string; lastTranscript?: string }; getConnectionHealth(): import('@driftcode/shared').ConnectionHealth },
+  speech?: { getStatus(): SpeechInputStatus; getConnectionHealth(): import('@driftcode/shared').ConnectionHealth },
 ): DashboardState {
   const health = defaultAdapterHealth();
   health.vscode = vscode.getConnectionHealth();
@@ -43,6 +45,9 @@ export function buildDashboardState(
   health.stt = speech?.getConnectionHealth() ?? ConnectionHealth.Disconnected;
 
   const speechStatus = speech?.getStatus();
+  const lastTranscript = speechStatus?.lastTranscript;
+  const safeTranscript =
+    lastTranscript && session.streamPrivacyActive ? redactSecrets(lastTranscript) : lastTranscript;
 
   return {
     sessionId: session.sessionId,
@@ -74,9 +79,14 @@ export function buildDashboardState(
           pttActive: speechStatus.pttActive,
           providerId: speechStatus.providerId,
           inboxPath: speechStatus.inboxPath,
-          lastTranscript: speechStatus.lastTranscript,
+          lastTranscript: safeTranscript,
+          lastTranscriptConfidence: speechStatus.lastTranscriptConfidence,
+          lastInputSource: speechStatus.lastInputSource,
         }
       : undefined,
+    pttState: { ...session.pushToTalkState },
+    lastSpeechInput: session.lastSpeechInput,
+    lastBlockedLowConfidence: session.lastBlockedLowConfidence,
     startedAt: session.startedAt,
     updatedAt: new Date().toISOString(),
   };

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCasing } from './casing.js';
+import { applyCasing, importDefaultIdentifier } from './casing.js';
 import { emitCodeFromText } from './code-emitter.js';
 import { SYMBOL_MAP } from './symbol-map.js';
 
@@ -75,10 +75,10 @@ describe('imports/exports', () => {
   it('named hook import', () => {
     assert.equal(emit('import use state from react'), "import { useState } from 'react'");
   });
-  it('path import', () => {
+  it('path import uses camelCase for services', () => {
     assert.equal(
       emit('import user service from services slash user service'),
-      "import UserService from 'services/userService'",
+      "import userService from 'services/userService'",
     );
   });
   it('export default', () => {
@@ -122,6 +122,51 @@ describe('literals', () => {
   it('boolean and null', () => {
     assert.equal(emit('true'), 'true');
     assert.equal(emit('null'), 'null');
+  });
+});
+
+describe('realistic coding phrases', () => {
+  it('fetch chain', () => {
+    assert.equal(
+      emit('const response equals await fetch open paren url close paren'),
+      'const response = await fetch(url)',
+    );
+    assert.equal(
+      emit('const data equals await response dot json open paren close paren'),
+      'const data = await response.json()',
+    );
+  });
+  it('guard clause', () => {
+    assert.equal(emit('if not response dot ok'), 'if (!response.ok) {');
+  });
+  it('throw new Error', () => {
+    assert.equal(
+      emit('throw new error open paren quote failed quote close paren'),
+      "throw new Error('failed')",
+    );
+  });
+  it('async handler', () => {
+    assert.equal(
+      emit('const handle submit equals async arrow function'),
+      'const handleSubmit = async () => ',
+    );
+  });
+  it('state setter and logging', () => {
+    assert.equal(emit('set loading open paren false close paren'), 'setLoading(false)');
+    assert.equal(emit('console dot log open paren user close paren'), 'console.log(user)');
+  });
+  it('return null', () => {
+    assert.equal(emit('return null'), 'return null');
+  });
+  it('export interface', () => {
+    assert.equal(emit('export interface user profile'), 'export interface UserProfile');
+  });
+});
+
+describe('casing conventions', () => {
+  it('importDefaultIdentifier', () => {
+    assert.equal(importDefaultIdentifier(['user', 'service']), 'userService');
+    assert.equal(importDefaultIdentifier(['react']), 'React');
   });
 });
 

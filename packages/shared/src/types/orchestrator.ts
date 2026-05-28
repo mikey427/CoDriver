@@ -1,5 +1,11 @@
 import type { RuntimeEvent } from './models.js';
 import type {
+  BlockedLowConfidenceRecord,
+  PushToTalkState,
+  SpeechInputUtterance,
+} from './speech-input.js';
+import type { UtteranceSource } from './enums.js';
+import type {
   AiTaskStatus,
   AiTaskType,
   ConfidenceBand,
@@ -49,6 +55,8 @@ export interface HarnessConfig {
   onboardingCompleted?: boolean;
   /** AI backend: `openai` (default) or `fake` for deterministic tests. Overridden by DRIFTCODE_AI_PROVIDER=fake. */
   aiProviderId?: 'openai' | 'fake';
+  /** Block non-emergency utterances below this STT confidence (0–1). Omit to skip gating. */
+  speechConfidenceThreshold?: number;
 }
 
 export interface HarnessAppTestStep {
@@ -86,6 +94,8 @@ export interface DashboardUtterance {
   normalizedText: string;
   timestamp: string;
   isEmergencyPhrase: boolean;
+  source?: UtteranceSource;
+  confidence?: number;
 }
 
 export interface DashboardParsedIntent {
@@ -120,6 +130,8 @@ export interface DashboardCommandHistoryEntry {
   latencyMs?: number;
   modeId?: ModeId | string;
   aiInvoked?: boolean;
+  source?: UtteranceSource;
+  speechConfidence?: number;
 }
 
 export interface DashboardAdapterHealth {
@@ -157,7 +169,17 @@ export interface DashboardState {
   activeAiTask?: DashboardActiveAiTask;
   pendingPatchSummary?: string;
   recentEvents?: RuntimeEvent[];
-  speechStatus?: { pttActive: boolean; providerId: string; inboxPath: string; lastTranscript?: string };
+  speechStatus?: {
+    pttActive: boolean;
+    providerId: string;
+    inboxPath: string;
+    lastTranscript?: string;
+    lastTranscriptConfidence?: number;
+    lastInputSource?: UtteranceSource;
+  };
+  pttState?: PushToTalkState;
+  lastSpeechInput?: SpeechInputUtterance;
+  lastBlockedLowConfidence?: BlockedLowConfidenceRecord;
   startedAt: string;
   updatedAt: string;
 }
@@ -165,6 +187,8 @@ export interface DashboardState {
 export interface UtteranceRequest {
   text: string;
   confidence?: number;
+  source?: UtteranceSource;
+  isFinal?: boolean;
 }
 
 export interface UtteranceResponse {
@@ -173,6 +197,8 @@ export interface UtteranceResponse {
   toolResults: Array<{ success: boolean; message?: string; errorCode?: string }>;
   blocked: boolean;
   message?: string;
+  source?: UtteranceSource;
+  speechConfidence?: number;
 }
 
 export interface AuditLogEntry {

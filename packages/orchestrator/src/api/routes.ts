@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import type { HarnessConfig, UtteranceRequest } from '@driftcode/shared';
+import { UtteranceSource } from '@driftcode/shared';
 import { DEFAULT_MODE_CONFIG_LIST, RuntimeSubsystem } from '@driftcode/shared';
 import type { CommandRouter } from '../router/command-router.js';
 import type { ConfigStore } from '../config/config-store.js';
@@ -64,10 +65,50 @@ export function registerRoutes(app: Express, ctx: ApiContext): void {
       return;
     }
     try {
-      res.json(await ctx.router.processUtterance(body.text));
+      res.json(
+        await ctx.router.processUtterance(body.text, {
+          source: body.source ?? UtteranceSource.Http,
+          confidence: body.confidence,
+          isFinal: body.isFinal !== false,
+        }),
+      );
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Processing failed' });
     }
+  });
+
+  app.get('/api/ptt/state', (_req, res) => {
+    res.json({ ptt: ctx.speech?.getPttState() ?? ctx.session.pushToTalkState });
+  });
+
+  app.post('/api/ptt/start', (req, res) => {
+    const source = req.body?.source === 'admin' || req.body?.source === 'keyboard' ? req.body.source : 'http';
+    ctx.speech?.pttStart(source);
+    res.json({ ok: true, ptt: ctx.speech?.getPttState() ?? ctx.session.pushToTalkState, dashboard: dashboardPayload(ctx) });
+  });
+
+  app.post('/api/ptt/stop', async (req, res) => {
+    ctx.speech?.pttStop();
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    const confidence = typeof req.body?.confidence === 'number' ? req.body.confidence : undefined;
+    const source =
+      req.body?.source === 'admin-mic' || req.body?.source === UtteranceSource.AdminMic
+        ? UtteranceSource.AdminMic
+        : req.body?.source === 'admin-manual' || req.body?.source === UtteranceSource.AdminManual
+          ? UtteranceSource.AdminManual
+          : req.body?.source === 'test' || req.body?.source === UtteranceSource.Test
+            ? UtteranceSource.Test
+            : UtteranceSource.Http;
+    let response;
+    if (text) {
+      response = await ctx.router.processUtterance(text, { source, confidence, isFinal: true });
+    }
+    res.json({ ok: true, ptt: ctx.speech?.getPttState() ?? ctx.session.pushToTalkState, response, dashboard: dashboardPayload(ctx) });
+  });
+
+  app.post('/api/ptt/cancel', (_req, res) => {
+    ctx.speech?.pttCancel();
+    res.json({ ok: true, ptt: ctx.speech?.getPttState() ?? ctx.session.pushToTalkState, dashboard: dashboardPayload(ctx) });
   });
 
   app.post('/api/emergency-stop', (_req, res) => {
@@ -83,6 +124,12 @@ export function registerRoutes(app: Express, ctx: ApiContext): void {
   app.get('/api/patch/pending', (_req, res) => {
     const patch = ctx.patchStore.get();
     res.json({ patch: patch ? { id: patch.id, path: patch.path, summary: patch.summary, createdAt: patch.createdAt } : null });
+  });
+
+  app.delete('/api/patch/pending', (_req, res) => {
+    ctx.patchStore.clear();
+    ctx.session.pendingPatchSummary = undefined;
+    res.json({ ok: true });
   });
 
   app.get('/api/config', (_req, res) => {
@@ -144,7 +191,7 @@ export function registerRoutes(app: Express, ctx: ApiContext): void {
       res.status(400).json({ error: 'text required' });
       return;
     }
-    await ctx.speech?.ingestText(text.trim(), 'api');
+    await ctx.speech?.ingestText(text.trim(), UtteranceSource.Http);
     res.json({ ok: true, dashboard: dashboardPayload(ctx) });
   });
 
@@ -313,7 +360,8 @@ export function registerRoutes(app: Express, ctx: ApiContext): void {
         event.eventType.startsWith('tool.') ||
         event.eventType.startsWith('utterance.') ||
         event.eventType.startsWith('confirmation.') ||
-        event.eventType.startsWith('intent.')
+        event.eventType.startsWith('intent.') ||
+        event.eventType.startsWith('ptt.')
       ) {
         sendDashboardEvent();
       }

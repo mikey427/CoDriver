@@ -73,11 +73,19 @@ export enum AdapterType {
 }
 
 export enum UtteranceSource {
-  VoicePtt = 'voice_ptt',
-  VoiceWake = 'voice_wake',
-  ButtonMacro = 'button_macro',
-  AdminReplay = 'admin_replay',
+  Http = 'http',
+  AdminManual = 'admin-manual',
+  AdminMic = 'admin-mic',
   Test = 'test',
+  Unknown = 'unknown',
+  /** @deprecated legacy spec value */
+  VoicePtt = 'voice_ptt',
+  /** @deprecated legacy spec value */
+  VoiceWake = 'voice_wake',
+  /** @deprecated legacy spec value */
+  ButtonMacro = 'button_macro',
+  /** @deprecated legacy spec value */
+  AdminReplay = 'admin_replay',
 }
 
 export enum ParsePath {

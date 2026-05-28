@@ -62,14 +62,53 @@ curl -X POST http://127.0.0.1:17345/api/tutorial/practice \
   -d '{"lessonId":"switch-command","text":"switch command mode","dryRun":true}'
 ```
 
+## VS Code extension
 
 1. Build: `npm run build:extension`
 2. Press F5 in `packages/vscode-extension` or install the VSIX
 3. Extension connects to `ws://127.0.0.1:17345/ws/vscode`
+4. Confirm dashboard **adapterHealth.vscode** = `connected` and **editorState** shows your open file
 
-Without the extension, orchestrator commands still work; editor/ dictation actions return `NOT_CONNECTED`.
+Without the extension, orchestrator commands still work; editor/dictation actions return `NOT_CONNECTED` with instructions to install the extension, reload VS Code, and verify the WebSocket URL.
 
-## Speech input
+**Hands-on script (no mic):** [docs/MANUAL-DOGFOOD.md](docs/MANUAL-DOGFOOD.md)
+
+### Diagnosing VS Code connection
+
+| Symptom | What to check |
+|---------|----------------|
+| `NOT_CONNECTED` on dictation/save/nav | Orchestrator running? Extension installed + reloaded? Status bar shows Connected? |
+| Dashboard `adapterHealth.vscode` disconnected | Wrong `driftcode.orchestratorUrl` in VS Code settings? Firewall blocking localhost? |
+| `PHRASE_RANGE_STALE` on correction | File edited manually after dictation — re-dictate or undo in VS Code |
+| Editor panel empty but connected | Open a file in VS Code; wait for `editor.stateChanged` sync |
+
+Send a test utterance:
+
+```bash
+npm run test:utterance -- "switch manual dictation mode"
+npm run test:utterance -- "const x equals 1"
+```
+
+Features that **require** the VS Code extension: insert text, corrections, navigation, structural edits, `wrap in if`, apply patch.
+
+Features that work **without** VS Code: mode switch, emergency stop, patch **preview**, fake AI patch creation.
+
+## Speech input (Phase 3 — experimental)
+
+Real speech is **optional**. All automated tests pass without a microphone.
+
+| Path | Notes |
+|------|-------|
+| Admin manual box | Dashboard → type utterance → source `admin-manual` |
+| Admin mic PTT | Dashboard → hold **Hold to talk** (Chrome/Edge Web Speech API) |
+| HTTP utterance | `npm run test:utterance -- "..."` — still the reliable CI path |
+| PTT API | `POST /api/ptt/start`, `/api/ptt/stop`, `/api/ptt/cancel`, `GET /api/ptt/state` |
+
+Confidence gating: set `speechConfidenceThreshold` in config (default `0.65`). Low-confidence non-emergency utterances return `LOW_CONFIDENCE` without mutating files.
+
+Full guide: [docs/PHASE3-SPEECH-INPUT.md](docs/PHASE3-SPEECH-INPUT.md)
+
+## Speech input (inbox / legacy)
 
 Three ways to inject voice without a mic:
 
@@ -98,6 +137,10 @@ npm run test:grammar      # Phase 2 unit tests (no orchestrator)
 npm run test:corrections  # correction registry mapping
 npm run test:phase2       # simulated editing session
 npm run test:core-loop    # Phase 1 acceptance (fake AI, emergency, patch flow)
+npm run test:preview-patch  # Phase 2.5 patch preview (no apply)
+npm run test:ptt            # Phase 3 PTT endpoints
+npm run test:speech-input   # Phase 3 source + confidence
+npm run test:phase3         # Phase 3 acceptance
 npm run test:mvp        # 8 smoke checks (health, modes, dictation, emergency, admin, overlay)
 npm run test:benchmark  # 30 deterministic registry commands (~80% intent match required)
 npm run audit:registry  # built-in command registry ↔ intent mapper audit (run after build)
@@ -140,3 +183,6 @@ Edit `.driftcode/config.json` (or `~/.driftcode/config.json`):
 | Playwright errors | `npm run setup` or `npx playwright install chromium` |
 | AI disabled | Set `openAiApiKey` in config |
 | Empty editor panel | Ensure VS Code extension is connected; state sync uses `{ state: ... }` |
+| `NOT_CONNECTED` | Start orchestrator, install/reload driftcode-vscode, check status bar + dashboard adapterHealth |
+| `NO_PATCH` on preview | Run `ask ai fix this` in AI Assist mode first (use fake AI for tests) |
+| `PHRASE_RANGE_STALE` | File changed since dictation — re-dictate the phrase |

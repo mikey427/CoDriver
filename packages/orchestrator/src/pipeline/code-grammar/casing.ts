@@ -43,8 +43,26 @@ export function parseCasingPrefix(text: string): { style: CasingStyle; remainder
 /** Default identifier casing for variables/functions vs types. */
 export function identifierFromWords(words: string[], context: 'variable' | 'type' | 'react' = 'variable'): string {
   if (words.length === 0) return '';
-  if (context === 'type' || context === 'react') {
+  if (context === 'type') {
+    return applyCasing(words, 'pascal');
+  }
+  if (context === 'react') {
     return applyCasing(words, 'pascal');
   }
   return applyCasing(words, 'camel');
+}
+
+/** Default import binding — camelCase for services; React is a special case. */
+export function importDefaultIdentifier(nameWords: string[]): string {
+  const key = nameWords.join(' ').toLowerCase().trim();
+  if (key === 'react') return 'React';
+  if (key.endsWith(' class')) {
+    return identifierFromWords(nameWords.slice(0, -1), 'type');
+  }
+  return identifierFromWords(nameWords, 'variable');
+}
+
+/** export default App for component-like names. */
+export function exportDefaultIdentifier(nameWords: string[]): string {
+  return identifierFromWords(nameWords, 'react');
 }

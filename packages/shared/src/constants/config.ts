@@ -37,6 +37,7 @@ export function createDefaultHarnessConfig(): HarnessConfig {
     speechInboxEnabled: true,
     onboardingCompleted: false,
     aiProviderId: 'openai',
+    speechConfidenceThreshold: 0.65,
     appTestFlows: [
       {
         id: 'login',

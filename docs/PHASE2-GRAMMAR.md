@@ -52,8 +52,24 @@ Registry `type {text}` / `insert {text}` slots run through `emitDictationSlot()`
 |-----|-------|
 | `import react from react` | `import React from 'react'` |
 | `import use state from react` | `import { useState } from 'react'` |
-| `import user service from services slash user service` | `import UserService from 'services/userService'` |
+| `import user service from services slash user service` | `import userService from 'services/userService'` |
 | `export default app` | `export default App` |
+
+**Casing rules:** variables/functions/services/hooks → **camelCase**; React/components/types/interfaces → **PascalCase**; `import react` → `React`; default service imports stay camelCase unless you say `class` (future).
+
+### Realistic coding phrases (Phase 2.5)
+
+| Say | Emits |
+|-----|-------|
+| `const response equals await fetch open paren url close paren` | `const response = await fetch(url)` |
+| `const data equals await response dot json open paren close paren` | `const data = await response.json()` |
+| `if not response dot ok` | `if (!response.ok) {` |
+| `throw new error open paren quote failed quote close paren` | `throw new Error('failed')` |
+| `const handle submit equals async arrow function` | `const handleSubmit = async () => ` |
+| `set loading open paren false close paren` | `setLoading(false)` |
+| `console dot log open paren user close paren` | `console.log(user)` |
+| `return null` | `return null` |
+| `export interface user profile` | `export interface UserProfile` |
 
 ### Control flow
 
@@ -95,30 +111,43 @@ Phrase metadata is tracked in the VS Code extension (`phrase-corrections.ts`) an
 
 ## Editor / navigation commands
 
-Work when VS Code extension is connected; otherwise `NOT_CONNECTED`:
+Work when VS Code extension is connected; otherwise `NOT_CONNECTED` with fix instructions (install extension, reload VS Code, verify `ws://127.0.0.1:17345/ws/vscode`). Check dashboard **adapterHealth.vscode** and **editorState**.
 
 - `go to line N`, `go to file …`, `go to symbol …`
 - `select current line/word/function`, `delete current line`, `duplicate line`, `move line up/down`
 - `comment line`, `format document`, `save file`
+- `wrap in if` / `wrap block in if statement` — wraps selection in `if (condition) { … }` (`NO_SELECTION` if nothing selected)
+
+### Patch preview (orchestrator — no VS Code required)
+
+| Command | Behavior |
+|---------|----------|
+| `preview patch` / `show patch` / `what is the fix` | Short summary of pending AI patch; **does not apply** |
+
+Returns `NO_PATCH` when empty. Protected paths show a warning without diff/secret content.
 
 ## Tests
 
 ```bash
-npm run test:grammar      # 27 unit tests, no orchestrator
-npm run test:corrections  # registry → intent mapping for corrections
-npm run test:phase2       # simulated editing session (orchestrator running)
-npm run test:core-loop    # Phase 1 regression
+npm run test:grammar        # grammar + patch-preview unit tests
+npm run test:corrections    # registry → intent mapping for corrections
+npm run test:phase2         # simulated editing session (orchestrator running)
+npm run test:preview-patch  # preview patch integration
+npm run test:core-loop      # Phase 1 regression
+npm run audit:registry
 ```
 
-## Known limitations (Phase 2)
+Manual walkthrough: [MANUAL-DOGFOOD.md](MANUAL-DOGFOOD.md)
+
+## Known limitations (Phase 2.5)
 
 - **No real microphone/STT** — utterances injected via HTTP API or admin
 - **Command mode** does not free-type code — switch to **Manual Dictation** first
 - **Brace balancing** is basic — control-flow emits opening fragments only
 - **Complex imports** (named multi-bind) not fully covered
-- **`wrapInIf`** registered but extension handler not implemented yet
+- **`wrapInIf` condition** is fixed to `condition` until phrase grammar supports custom conditions
 - **Full E2E** with live VS Code requires extension connected + F5 or install
 
 ## Phase 3 (planned)
 
-- Whisper / continuous STT, MOZA bindings, richer block templates, previewPatch, wrapInIf
+- Whisper / continuous STT, MOZA bindings, richer block templates, custom if conditions

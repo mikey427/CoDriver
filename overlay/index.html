@@ -73,7 +73,8 @@
     .file { color: #34d399; font-family: monospace; font-size: 12px; }
     .confidence { font-size: 11px; opacity: 0.8; }
     .disconnected { opacity: 0.5; font-style: italic; }
-    .ptt { font-size: 10px; color: #f472b6; margin-left: auto; }
+    .ptt { font-size: 10px; color: #f472b6; margin-left: auto; font-weight: 700; letter-spacing: 0.06em; }
+    .listening { font-size: 10px; color: #f472b6; animation: pulse 1s infinite; }
   </style>
 </head>
 <body>
@@ -135,7 +136,10 @@
         confirmBox.style.display = 'none';
       }
 
-      document.getElementById('pttStatus').textContent = state.speechStatus?.pttActive ? '● PTT' : '';
+      document.getElementById('pttStatus').textContent =
+        (state.pttState?.active || state.speechStatus?.pttActive)
+          ? '● LISTENING'
+          : '';
 
       const utterance = state.lastNormalizedUtterance;
       let heard = utterance?.normalizedText || '—';

@@ -1,4 +1,4 @@
-import { applyCasing, identifierFromWords, parseCasingPrefix } from './casing.js';
+import { applyCasing, exportDefaultIdentifier, identifierFromWords, importDefaultIdentifier, parseCasingPrefix } from './casing.js';
 import { KEYWORD_MAP, LITERAL_MAP } from './keyword-map.js';
 import { findSymbolPhrase, SYMBOL_MAP } from './symbol-map.js';
 import type { CodeEmissionResult } from './grammar-types.js';
@@ -25,6 +25,22 @@ function normalizeOutput(text: string): string {
     .replace(/\[\s+/g, '[')
     .replace(/\s+\]/g, ']')
     .trim();
+}
+
+function readQuotedString(tokens: string[], start: number): { text: string; end: number } | null {
+  if (tokens[start] !== 'quote' && tokens[start] !== 'double' && tokens[start + 1] !== 'quote') return null;
+  const quoteChar = tokens[start] === 'quote' ? "'" : '"';
+  const contentStart = tokens[start] === 'quote' ? start + 1 : start + 2;
+  let i = contentStart;
+  const words: string[] = [];
+  while (i < tokens.length) {
+    if (tokens[i] === 'quote' || (tokens[i] === 'double' && tokens[i + 1] === 'quote')) break;
+    words.push(tokens[i]);
+    i++;
+  }
+  if (i >= tokens.length) return null;
+  const end = tokens[i] === 'quote' ? i + 1 : i + 2;
+  return { text: `${quoteChar}${words.join(' ')}${quoteChar}`, end };
 }
 
 function emitValueTokens(tokens: string[]): string {
@@ -86,6 +102,13 @@ function emitTokensInternal(tokens: string[]): CodeEmissionResult {
   let i = 0;
 
   while (i < tokens.length) {
+    const quoted = readQuotedString(tokens, i);
+    if (quoted) {
+      parts.push(quoted.text);
+      i = quoted.end;
+      continue;
+    }
+
     const sym = findSymbolPhrase(tokens, i);
     if (sym) {
       parts.push(sym.emit);
@@ -103,6 +126,25 @@ function emitTokensInternal(tokens: string[]): CodeEmissionResult {
     if (tokens[i] === 'equals') {
       parts.push(' = ');
       i++;
+      continue;
+    }
+
+    if (tokens[i] === 'new') {
+      parts.push('new ');
+      i++;
+      const id = emitIdentifierTokens(tokens, i);
+      if (id.id) {
+        const cap = id.id === 'error' ? 'Error' : id.id.charAt(0).toUpperCase() + id.id.slice(1);
+        parts.push(cap);
+      }
+      i = id.end;
+      if (tokens[i] === 'open' && tokens[i + 1] === 'paren') {
+        const call = readCallArgs(tokens, i);
+        if (call) {
+          parts.push('(', call.args, ')');
+          i = call.end;
+        }
+      }
       continue;
     }
 
@@ -185,6 +227,12 @@ function tryPhrasePatterns(text: string): CodeEmissionResult | null {
     return ok(applyCasing(words, casing.style), 0.95, 'casing');
   }
 
+  const asyncConst = normalized.match(/^const (.+?) equals async arrow function$/);
+  if (asyncConst) {
+    const name = identifierFromWords(asyncConst[1].split(/\s+/), 'variable');
+    return ok(`const ${name} = async () => `, 0.95, 'const async arrow');
+  }
+
   const decl = normalized.match(/^(const|let)\s+(.+?)\s+equals\s+(.+)$/);
   if (decl) {
     const name = identifierFromWords(decl[2].split(/\s+/), 'variable');
@@ -221,13 +269,13 @@ function tryPhrasePatterns(text: string): CodeEmissionResult | null {
       const hook = identifierFromWords(nameWords, 'variable');
       return ok(`import { ${hook} } from '${modulePath}'`, 0.88, 'import named');
     }
-    const name = identifierFromWords(nameWords, 'react');
+    const name = importDefaultIdentifier(nameWords);
     return ok(`import ${name} from '${modulePath}'`, 0.88, 'import default');
   }
 
   if (normalized.startsWith('export default ')) {
     const rest = normalized.slice('export default '.length);
-    const name = identifierFromWords(rest.split(/\s+/), 'react');
+    const name = exportDefaultIdentifier(rest.split(/\s+/));
     return ok(`export default ${name}`, 0.9, 'export default');
   }
 
@@ -244,6 +292,22 @@ function tryPhrasePatterns(text: string): CodeEmissionResult | null {
     return ok(`export type ${name}`, 0.9, 'export type');
   }
 
+  if (normalized.startsWith('export interface ')) {
+    const rest = normalized.slice('export interface '.length);
+    const name = identifierFromWords(rest.split(/\s+/), 'type');
+    return ok(`export interface ${name}`, 0.9, 'export interface');
+  }
+
+  if (normalized.startsWith('if not ')) {
+    const cond = emitValueTokens(tokenize(normalized.slice('if not '.length)));
+    return ok(`if (!${cond}) {`, 0.9, 'if not');
+  }
+
+  if (normalized.startsWith('throw ')) {
+    const rest = emitValueTokens(tokenize(normalized.slice('throw '.length)));
+    return ok(`throw ${rest}`, 0.9, 'throw');
+  }
+
   if (normalized === 'if user') return ok('if (user) {', 0.9, 'if');
   if (normalized === 'if not user') return ok('if (!user) {', 0.9, 'if not');
   if (normalized === 'else') return ok('} else {', 0.9, 'else');
@@ -258,6 +322,14 @@ function tryPhrasePatterns(text: string): CodeEmissionResult | null {
     const item = identifierFromWords([forEach[1]], 'variable');
     const collection = identifierFromWords([forEach[2]], 'variable');
     return ok(`${collection}.forEach((${item}) => {`, 0.88, 'for each');
+  }
+
+  const setState = normalized.match(/^set ([a-z][\w ]*?) open paren (.+) close paren$/);
+  if (setState) {
+    const prop = identifierFromWords(setState[1].split(/\s+/), 'variable');
+    const cap = prop.charAt(0).toUpperCase() + prop.slice(1);
+    const args = emitValueTokens(tokenize(setState[2]));
+    return ok(`set${cap}(${args})`, 0.88, 'setState');
   }
 
   const typePhrase = normalized.match(/^type\s+(.+)$/);

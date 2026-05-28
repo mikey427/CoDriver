@@ -1,6 +1,6 @@
 # DriftCode Harness — Implementation Status
 
-Last updated: Phase 2 manual coding grammar pass.
+Last updated: Phase 3 experimental speech input.
 
 This document is intentionally honest about what works today vs what is still scaffold.
 
@@ -40,27 +40,56 @@ This document is intentionally honest about what works today vs what is still sc
 
 See [docs/PHASE2-GRAMMAR.md](PHASE2-GRAMMAR.md) for phrase tables and limitations.
 
+## Phase 2.5 — Hardening (this pass)
+
+| Item | Status |
+|------|--------|
+| Import/casing conventions | **Done** — camelCase services; PascalCase components/types |
+| `wrapInIf` | **Done** — VS Code wraps selection; `NO_SELECTION` when empty |
+| `preview patch` commands | **Done** — read-only summary; no diff/secrets in overlay |
+| Realistic phrase tests | **Done** — fetch/json, throw, setState, export interface, etc. |
+| VS Code session docs | **Done** — TESTING + MANUAL-DOGFOOD + clearer `NOT_CONNECTED` |
+| `docs/MANUAL-DOGFOOD.md` | **Done** — 15-step hands-on script (no mic) |
+
+## Phase 3 — Experimental speech input (this pass)
+
+| Item | Status |
+|------|--------|
+| Input source model (`http`, `admin-manual`, `admin-mic`, `test`) | **Done** |
+| PTT state + `/api/ptt/*` endpoints | **Done** |
+| Admin manual utterance input | **Done** — dashboard text box |
+| Admin mic/PTT panel (Web Speech API) | **Done** — experimental, optional |
+| Confidence threshold + `LOW_CONFIDENCE` block | **Done** |
+| Dashboard/overlay listening indicator | **Done** |
+| Emergency clears PTT | **Done** |
+| `npm run test:phase3` | **Done** |
+
+See [docs/PHASE3-SPEECH-INPUT.md](PHASE3-SPEECH-INPUT.md).
+
+**Not Phase 3:** MOZA/wheel, always-listening, global hotkeys, stream audio routing.
+
 ## What works today (testable)
 
 - Utterance injection → normalize → parse → route → adapter dispatch
 - Mode switching, manual dictation grammar, registry commands
 - Emergency stop + resume
-- Fake or OpenAI AI assist → pending patch → apply workflow
+- Fake or OpenAI AI assist → pending patch → **preview** → apply workflow
 - Admin dashboard + overlay SSE
 - VS Code extension WebSocket (when connected)
 - Terminal allowlist/blocklist (basic)
 - Browser/Playwright app-test flows (optional peer)
 - HTTP speech inbox / PTT text injection
+- **Experimental admin mic/PTT** (browser Web Speech API — optional)
+- PTT API (`/api/ptt/start|stop|cancel|state`) + confidence gating
 
 ## What is scaffold or partial
 
 | Area | Reality |
 |------|---------|
-| **Microphone / STT** | Whisper path exists but not driving-safe continuous listen |
+| **Microphone / STT** | Admin browser mic (experimental); inbox/HTTP still primary; no MOZA/wheel |
 | **MOZA R5 / hardware PTT** | Not implemented |
 | **Vibe coding autonomy** | Mode exists; bounded multi-step chain not built |
 | **AI free-form typing** | Use **Vibe Coding** + `ask ai …` or registry `type {text}` in dictation; no always-on “AI types whatever I say” |
-| **previewPatch** | Referenced in modes; extension handler missing |
 | **Terminal interrupt** | Stub only |
 | **OBS end-to-end** | Adapter exists; stream scene workflows untested |
 | **Profiles / import-export** | Planned V1 |
@@ -83,6 +112,10 @@ See [docs/PHASE2-GRAMMAR.md](PHASE2-GRAMMAR.md) for phrase tables and limitation
 npm run test:grammar      # Phase 2 unit tests
 npm run test:corrections  # correction registry tests
 npm run test:phase2       # simulated dictation session
+npm run test:preview-patch # Phase 2.5 patch preview
+npm run test:ptt           # Phase 3 PTT endpoints
+npm run test:speech-input  # Phase 3 source + confidence
+npm run test:phase3        # Phase 3 acceptance
 npm run test:core-loop    # Phase 1 acceptance
 npm run test:mvp          # smoke
 npm run test:benchmark    # registry parse rate
@@ -101,8 +134,7 @@ Or: `DRIFTCODE_AI_PROVIDER=fake npm start`
 
 ## Future phases (not started in Phase 1)
 
-- Phase 2: Production STT/PTT, MOZA bindings, driving-safe mic UX
-- Phase 3: Vibe coding step limits, previewPatch, terminal interrupt
+- Phase 4: MOZA/wheel PTT, driving-safe continuous STT, stream audio routing
 - Phase 4: Stream routing, OBS scenes, privacy redaction depth
 - Phase 5: Profiles, replay debugger, config import/export
 

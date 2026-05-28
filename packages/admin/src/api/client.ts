@@ -319,6 +319,40 @@ export const api = {
       body: JSON.stringify({ lessonId, text, dryRun }),
     });
   },
+
+  submitUtterance(
+    text: string,
+    options: { source?: import('@driftcode/shared').UtteranceSource; confidence?: number; isFinal?: boolean } = {},
+  ): Promise<import('./types').UtteranceResponse> {
+    return request('/api/utterance', {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        source: options.source,
+        confidence: options.confidence,
+        isFinal: options.isFinal !== false,
+      }),
+    });
+  },
+
+  pttStart(source: 'admin' | 'http' | 'keyboard' = 'admin'): Promise<{ ok: boolean; ptt: import('./types').PushToTalkState }> {
+    return request('/api/ptt/start', {
+      method: 'POST',
+      body: JSON.stringify({ source }),
+    });
+  },
+
+  pttStop(): Promise<{ ok: boolean; ptt: import('./types').PushToTalkState }> {
+    return request('/api/ptt/stop', { method: 'POST', body: '{}' });
+  },
+
+  pttCancel(): Promise<{ ok: boolean; ptt: import('./types').PushToTalkState }> {
+    return request('/api/ptt/cancel', { method: 'POST', body: '{}' });
+  },
+
+  getPttState(): Promise<{ ptt: import('./types').PushToTalkState }> {
+    return request('/api/ptt/state');
+  },
 };
 
 export function parseStreamMessage(data: string): DashboardState | RuntimeEvent | null {

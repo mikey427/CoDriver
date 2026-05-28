@@ -6,6 +6,7 @@ import {
   RuntimeEventSeverity,
   RuntimeSubsystem,
   FocusTarget,
+  ConfidenceBand,
 } from '@driftcode/shared';
 import type { AiIntentLayer } from '../ai/ai-intent-layer.js';
 import type { BrowserAdapter } from '../adapters/browser-adapter.js';
@@ -25,9 +26,12 @@ import type { AudioFeedback } from '../services/audio-feedback.js';
 import type { DevServerManager } from '../services/dev-server-manager.js';
 import type { PatchStore } from '../services/patch-store.js';
 import type { ObsAdapter } from '../adapters/obs-adapter.js';
-import type { HarnessConfig, DashboardCommandHistoryEntry, ToolRequest, ToolResult, UtteranceResponse } from '@driftcode/shared';
+import type { HarnessConfig, DashboardCommandHistoryEntry, ToolRequest, ToolResult, UtteranceResponse, ProcessUtteranceOptions } from '@driftcode/shared';
+import { UtteranceSource } from '@driftcode/shared';
+import type { SpeechInputService } from '../services/speech-input-service.js';
 import { AppTestRunner } from '../services/app-test-runner.js';
 import { isProtectedPath } from '../services/protected-paths.js';
+import { buildPatchPreview } from '../services/patch-preview.js';
 import { validatePatch } from '../services/patch-validator.js';
 import { focusApplication } from '../services/speech-input-service.js';
 import { redactSecrets } from '../services/redact-secrets.js';
@@ -35,6 +39,7 @@ import { redactSecrets } from '../services/redact-secrets.js';
 export class CommandRouter {
   private riskClassifier = new RiskClassifier();
   private appTestRunner: AppTestRunner;
+  private speechInput?: SpeechInputService;
 
   constructor(
     private session: Session,
@@ -62,27 +67,79 @@ export class CommandRouter {
     this.appTestRunner = new AppTestRunner(config, this.browser);
   }
 
-  async processUtterance(rawText: string): Promise<UtteranceResponse> {
+  setSpeechInput(speech: SpeechInputService): void {
+    this.speechInput = speech;
+  }
+
+  async processUtterance(rawText: string, options: ProcessUtteranceOptions = {}): Promise<UtteranceResponse> {
+    const source: UtteranceSource = options.source ?? UtteranceSource.Http;
+    const confidence = options.confidence;
+    const threshold = this.config.speechConfidenceThreshold ?? 0.65;
+
     this.eventBus.emit('utterance.received', { rawText }, { subsystem: RuntimeSubsystem.Speech });
 
     const utterance = this.normalizer.normalize(rawText);
+    this.session.lastInputSource = source;
+    this.session.lastSpeechConfidence = confidence;
     this.session.lastNormalizedUtterance = {
       ...utterance,
+      source,
+      confidence,
       rawText: this.session.streamPrivacyActive ? redactSecrets(utterance.rawText) : utterance.rawText,
       normalizedText: this.session.streamPrivacyActive ? redactSecrets(utterance.normalizedText) : utterance.normalizedText,
     };
-    this.eventBus.emit('utterance.normalized', { utterance }, { subsystem: RuntimeSubsystem.Normalizer, utteranceId: utterance.id });
+    this.eventBus.emit('utterance.normalized', { utterance: this.session.lastNormalizedUtterance }, { subsystem: RuntimeSubsystem.Normalizer, utteranceId: utterance.id });
+
+    if (confidence != null && confidence < threshold && !utterance.isEmergencyPhrase) {
+      this.session.lastBlockedLowConfidence = {
+        text: rawText,
+        confidence,
+        source,
+        at: new Date().toISOString(),
+      };
+      const blockedIntent = {
+        id: uuidv4(),
+        summary: 'Low speech confidence — not executed',
+        routingPath: 'blocked' as const,
+        intentType: IntentType.Unknown,
+        confidence,
+        confidenceBand: ConfidenceBand.Reject,
+      };
+      this.session.lastParsedIntent = blockedIntent;
+      this.session.pushCommandHistory({
+        id: uuidv4(),
+        timestamp: new Date().toISOString(),
+        routingPath: 'blocked',
+        summary: `Blocked low confidence (${Math.round(confidence * 100)}%): ${rawText.slice(0, 60)}`,
+        success: false,
+        modeId: this.session.activeModeId,
+        source,
+        speechConfidence: confidence,
+      });
+      this.audio.beep('error');
+      return {
+        utterance: this.session.lastNormalizedUtterance,
+        intent: blockedIntent,
+        toolResults: [{ success: false, errorCode: 'LOW_CONFIDENCE', message: `Speech confidence ${Math.round(confidence * 100)}% below threshold ${Math.round(threshold * 100)}%` }],
+        blocked: true,
+        message: 'Low confidence — utterance not executed',
+        source,
+        speechConfidence: confidence,
+      };
+    }
 
     if (utterance.isEmergencyPhrase) {
       const result = this.activateEmergency('utterance');
       const intent = this.parser.parse(utterance);
       this.session.lastParsedIntent = toDashboardIntent(intent);
       return {
-        utterance,
+        utterance: this.session.lastNormalizedUtterance ?? utterance,
         intent: this.session.lastParsedIntent,
         toolResults: [{ success: result.success, message: result.output }],
         blocked: true,
         message: 'Emergency stop activated — say resume previous mode to continue',
+        source,
+        speechConfidence: confidence,
       };
     }
 
@@ -106,6 +163,8 @@ export class CommandRouter {
         toolResults: toolResults.map((r) => ({ success: r.success, message: r.output, errorCode: r.errorCode })),
         blocked: false,
         message: redactSecrets(aiResult.summary, this.session.streamPrivacyActive),
+        source,
+        speechConfidence: confidence,
       };
     }
 
@@ -130,6 +189,8 @@ export class CommandRouter {
       toolResults: results.map((r) => ({ success: r.success, message: r.output, errorCode: r.errorCode })),
       blocked,
       message: responseMessage,
+      source,
+      speechConfidence: confidence,
     };
   }
 
@@ -209,6 +270,7 @@ export class CommandRouter {
 
   activateEmergency(source: string) {
     this.session.activateEmergency();
+    this.speechInput?.clearPttOnEmergency();
     this.confirmations.clear();
     this.aiLayer.cancelActive();
     this.audio.stopTts();
@@ -265,6 +327,10 @@ export class CommandRouter {
   }
 
   private async dispatchEditor(intent: InternalParsedIntent) {
+    if (intent.slots.action === 'previewPatch') {
+      return this.previewPatch(intent);
+    }
+
     if (intent.slots.action === 'applyPatch') {
       const patch = this.patchStore.get();
       if (!patch) {
@@ -392,6 +458,45 @@ export class CommandRouter {
     });
     const result = await this.dispatch(req, intent);
     return result;
+  }
+
+  private previewPatch(intent: InternalParsedIntent): ToolResult {
+    const patch = this.patchStore.get();
+    const preview = buildPatchPreview(patch, this.config);
+    const req = createToolRequest({
+      sessionId: this.session.sessionId,
+      correlationId: uuidv4(),
+      adapter: AdapterType.Orchestrator,
+      action: 'previewPatch',
+      parameters: {},
+      description: 'Preview patch',
+      sourceId: intent.id,
+    });
+
+    if (!preview.hasPatch) {
+      return createToolResult({
+        toolRequest: req,
+        success: false,
+        errorCode: 'NO_PATCH',
+        errorMessage: 'No pending patch',
+        message: preview.overlayText,
+      });
+    }
+
+    this.audio.speakBrief(preview.overlayText);
+    return createToolResult({
+      toolRequest: req,
+      success: true,
+      message: preview.summary,
+      structuredData: {
+        overlayText: preview.overlayText,
+        path: preview.path,
+        patchType: preview.patchType,
+        protected: preview.protected,
+        valid: preview.valid,
+        validationError: preview.validationError,
+      },
+    });
   }
 
   private async dispatchTerminal(intent: InternalParsedIntent) {
@@ -745,6 +850,8 @@ export class CommandRouter {
       latencyMs: result.durationMs,
       modeId: this.session.activeModeId,
       aiInvoked: intent.intentType === IntentType.AiRequest || intent.routingPath === 'ai',
+      source: this.session.lastInputSource,
+      speechConfidence: this.session.lastSpeechConfidence,
     };
     this.session.pushCommandHistory(historyEntry);
 
@@ -762,6 +869,8 @@ export class CommandRouter {
       latencyMs: result.durationMs,
       modeId: this.session.activeModeId,
       aiInvoked: intent.intentType === IntentType.AiRequest || intent.routingPath === 'ai',
+      source: this.session.lastInputSource,
+      speechConfidence: this.session.lastSpeechConfidence,
     };
     this.session.pushCommandHistory(historyEntry);
   }

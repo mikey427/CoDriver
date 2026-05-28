@@ -1,7 +1,15 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, watch } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { ConnectionHealth, FocusTarget, RuntimeSubsystem } from '@driftcode/shared';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  ConnectionHealth,
+  FocusTarget,
+  RuntimeSubsystem,
+  UtteranceSource,
+  type ProcessUtteranceOptions,
+  type PttSource,
+} from '@driftcode/shared';
 import type { HarnessConfig } from '@driftcode/shared';
 import type { EventBus } from '../event-bus.js';
 import type { CommandRouter } from '../router/command-router.js';
@@ -15,18 +23,18 @@ export interface SpeechInputStatus {
   providerId: string;
   inboxPath: string;
   lastTranscript?: string;
+  lastTranscriptConfidence?: number;
   lastProcessedAt?: string;
+  lastInputSource?: UtteranceSource;
   whisperAvailable?: boolean;
 }
 
 export class SpeechInputService {
-  private pttActive = false;
-  private pttStartedAt?: string;
-  private pttBuffer = '';
   private watcher?: ReturnType<typeof watch>;
   private pollTimer?: ReturnType<typeof setInterval>;
   private status: SpeechInputStatus;
   private processedFiles = new Set<string>();
+  private pendingTranscript = '';
 
   constructor(
     private config: HarnessConfig,
@@ -81,9 +89,14 @@ export class SpeechInputService {
   getStatus(): SpeechInputStatus {
     return {
       ...this.status,
-      pttActive: this.pttActive,
-      whisperAvailable: this.config.sttProviderId === 'openai-whisper' && Boolean(this.config.openAiApiKey),
+      pttActive: this.session.pushToTalkState.active,
+      lastInputSource: this.session.lastInputSource,
+      lastTranscriptConfidence: this.session.lastSpeechConfidence,
     };
+  }
+
+  getPttState() {
+    return { ...this.session.pushToTalkState };
   }
 
   refreshConfig(config: HarnessConfig): void {
@@ -97,7 +110,7 @@ export class SpeechInputService {
     const result = await this.stt.transcribe(audio, { mimeType, processAsCommand });
     if (!result.text) return { transcript: '', processed: false };
     if (processAsCommand) {
-      await this.ingestText(result.text, 'whisper');
+      await this.ingestText(result.text, UtteranceSource.AdminMic, result.confidence);
     }
     return { transcript: result.text, processed: processAsCommand };
   }
@@ -106,38 +119,95 @@ export class SpeechInputService {
     return this.status.connected ? ConnectionHealth.Connected : ConnectionHealth.Disconnected;
   }
 
+  pttStart(source: PttSource = 'http'): void {
+    this.session.pushToTalkState = {
+      active: true,
+      source,
+      startedAt: new Date().toISOString(),
+    };
+    this.pendingTranscript = '';
+    this.status.pttActive = true;
+    this.eventBus.emit('utterance.received', { rawText: `[PTT:${source}]` }, { subsystem: RuntimeSubsystem.Speech, message: 'PTT started' });
+  }
+
+  pttStop(): { active: false } {
+    const now = new Date().toISOString();
+    this.session.pushToTalkState = {
+      ...this.session.pushToTalkState,
+      active: false,
+      lastReleasedAt: now,
+    };
+    this.status.pttActive = false;
+    this.eventBus.emit('utterance.received', { rawText: '[PTT stop]' }, { subsystem: RuntimeSubsystem.Speech, message: 'PTT stopped' });
+    return { active: false };
+  }
+
+  pttCancel(): void {
+    const now = new Date().toISOString();
+    this.session.pushToTalkState = {
+      active: false,
+      source: this.session.pushToTalkState.source,
+      cancelledAt: now,
+      lastReleasedAt: now,
+    };
+    this.pendingTranscript = '';
+    this.status.pttActive = false;
+    this.eventBus.emit('utterance.received', { rawText: '[PTT cancel]' }, { subsystem: RuntimeSubsystem.Speech, message: 'PTT cancelled' });
+  }
+
+  /** Legacy alias */
   pttDown(source: 'voice' | 'button' | 'api' = 'api'): void {
-    this.pttActive = true;
-    this.pttStartedAt = new Date().toISOString();
-    this.pttBuffer = '';
+    const mapped: PttSource = source === 'api' ? 'http' : source === 'button' ? 'admin' : 'unknown';
+    this.pttStart(mapped);
     this.eventBus.emit('utterance.received', { rawText: `[PTT down:${source}]` }, { subsystem: RuntimeSubsystem.Speech });
   }
 
   async pttUp(text?: string): Promise<{ processed: boolean; transcript?: string }> {
-    const durationMs = this.pttStartedAt
-      ? Date.now() - new Date(this.pttStartedAt).getTime()
-      : 0;
-    this.pttActive = false;
-    const transcript = (text ?? this.pttBuffer).trim();
-    this.log.debug({ durationMs, transcript: transcript.slice(0, 80) }, 'PTT up');
-
+    this.pttStop();
+    const transcript = (text ?? this.pendingTranscript).trim();
     if (!transcript) {
       return { processed: false };
     }
-
     this.status.lastTranscript = transcript;
     this.status.lastProcessedAt = new Date().toISOString();
-    await this.router.processUtterance(transcript);
+    await this.router.processUtterance(transcript, { source: UtteranceSource.Http, isFinal: true });
     return { processed: true, transcript };
   }
 
-  async ingestText(text: string, source = 'inbox'): Promise<void> {
+  async submitTranscript(
+    text: string,
+    options: ProcessUtteranceOptions & { source: UtteranceSource },
+  ): Promise<Awaited<ReturnType<CommandRouter['processUtterance']>>> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error('Empty transcript');
+    }
+    this.status.lastTranscript = trimmed;
+    this.status.lastTranscriptConfidence = options.confidence;
+    this.status.lastProcessedAt = new Date().toISOString();
+    this.session.lastSpeechInput = {
+      id: uuidv4(),
+      text: trimmed,
+      source: options.source,
+      confidence: options.confidence,
+      isFinal: options.isFinal !== false,
+      startedAt: this.session.pushToTalkState.startedAt,
+      completedAt: new Date().toISOString(),
+    };
+    return this.router.processUtterance(trimmed, options);
+  }
+
+  async ingestText(text: string, source: UtteranceSource = UtteranceSource.Unknown, confidence?: number): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
-    this.status.lastTranscript = trimmed;
-    this.status.lastProcessedAt = new Date().toISOString();
-    this.eventBus.emit('utterance.received', { rawText: trimmed }, { subsystem: RuntimeSubsystem.Speech, message: `Speech inbox (${source})` });
-    await this.router.processUtterance(trimmed);
+    this.eventBus.emit('utterance.received', { rawText: trimmed }, { subsystem: RuntimeSubsystem.Speech, message: `Speech ingest (${source})` });
+    await this.submitTranscript(trimmed, { source, confidence, isFinal: true });
+  }
+
+  clearPttOnEmergency(): void {
+    if (this.session.pushToTalkState.active) {
+      this.pttCancel();
+    }
   }
 
   private resolveInboxPath(): string {
@@ -170,7 +240,7 @@ export class SpeechInputService {
       if (!existsSync(filePath)) return;
       const text = readFileSync(filePath, 'utf-8').trim();
       if (text) {
-        await this.ingestText(text, 'inbox');
+        await this.ingestText(text, UtteranceSource.Http);
       }
       const processedDir = join(this.resolveInboxPath(), 'processed');
       if (!existsSync(processedDir)) mkdirSync(processedDir, { recursive: true });

@@ -16,11 +16,18 @@
     "test:utterance": "node scripts/test-utterance.mjs",
     "test:mvp": "node scripts/test-mvp.mjs",
     "test:core-loop": "node scripts/test-core-loop.mjs",
-    "test:grammar": "npm run build -w @driftcode/orchestrator && node --test packages/orchestrator/dist/pipeline/code-grammar/code-emitter.test.js",
+    "test:grammar": "npm run build -w @driftcode/orchestrator && node --test packages/orchestrator/dist/pipeline/code-grammar/code-emitter.test.js packages/orchestrator/dist/services/patch-preview.test.js",
     "test:corrections": "node scripts/test-corrections.mjs",
     "test:phase2": "node scripts/test-phase2.mjs",
+    "test:preview-patch": "node scripts/test-preview-patch.mjs",
+    "test:ptt": "node scripts/test-ptt.mjs",
+    "test:speech-input": "node scripts/test-speech-input.mjs",
+    "test:phase3": "node scripts/test-phase3.mjs",
     "test:benchmark": "node scripts/test-benchmark.mjs",
     "audit:registry": "node scripts/audit-registry.mjs",
     "speech:send": "node scripts/speech-inbox.mjs"
+  },
+  "dependencies": {
+    "openai": "^4.104.0"
   }
 }
